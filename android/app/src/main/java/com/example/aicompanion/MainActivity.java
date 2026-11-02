@@ -1,4 +1,4 @@
-﻿package com.example.dafeiyu;
+﻿package com.example.aicompanion;
 
 import android.Manifest;
 import android.app.AlertDialog;
@@ -25,7 +25,7 @@ public class MainActivity extends Activity {
 
     public static final String DEFAULT_URL =
             "https://CHANGE-ME.trycloudflare.com/";
-    private static final String PREFS = "dafeiyu";
+    private static final String PREFS = "aicompanion";
     private static final int FILE_CHOOSER_CODE = 1001;
     private static final int MIC_CODE = 1002;
 
@@ -48,7 +48,7 @@ public class MainActivity extends Activity {
         st.setMediaPlaybackRequiresUserGesture(false);
         st.setAllowFileAccess(true);
         st.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
-        st.setUserAgentString(st.getUserAgentString() + " DafeiyuApp/1.0");
+        st.setUserAgentString(st.getUserAgentString() + " AiCompanionApp/1.0");
 
         web.setWebViewClient(new WebViewClient() {
             @Override
@@ -132,7 +132,7 @@ public class MainActivity extends Activity {
         input.setInputType(InputType.TYPE_TEXT_VARIATION_URI);
         input.setText(loadUrl());
         new AlertDialog.Builder(this)
-                .setTitle("大肥鱼")
+                .setTitle("你的角色")
                 .setMessage(message)
                 .setView(input)
                 .setPositiveButton("连接", (d, w) -> {

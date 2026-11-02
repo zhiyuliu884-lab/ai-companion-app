@@ -4,7 +4,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0b1020">
-<title>大肥鱼</title>
+<title>你的角色</title>
 <link rel="manifest" href="/manifest.json">
 <link rel="apple-touch-icon" href="/static/icon-180.png">
 <link rel="icon" href="/static/icon-192.png">
@@ -13,9 +13,10 @@
 html,body{margin:0;height:100%;background:#0b1020;color:#e8eefc;
   font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;overscroll-behavior:none}
 #bgwrap{position:fixed;inset:0;z-index:0;background:#0b1020;overflow:hidden}
-#bgwrap::before{content:'';position:absolute;inset:-40px;background:url('/static/wallpaper.jpg?v=3') center/cover no-repeat;
+#bgwrap::before{content:'';position:absolute;inset:-40px;background:var(--wall,none) center/cover no-repeat;
   filter:blur(26px) brightness(.42) saturate(.9)}
-#bgwrap::after{content:'';position:absolute;inset:0;background:url('/static/wallpaper.jpg?v=3') center top/contain no-repeat}
+#bgwrap::after{content:'';position:absolute;inset:0;background:var(--wall,none) center top/contain no-repeat}
+#bgwrap{background:linear-gradient(160deg,#101a33,#0b1020 60%,#121d36)}
 #veil{position:fixed;inset:0;z-index:0;background:linear-gradient(180deg,rgba(6,10,22,.35),rgba(6,10,22,.6))}
 #app{display:flex;flex-direction:column;height:100dvh;position:relative;z-index:1}
 header{padding:calc(env(safe-area-inset-top) + 10px) 14px 10px;font-size:15px;
@@ -87,12 +88,21 @@ header button{font-size:13px;color:#9fb4e0;padding:4px 8px}
 #call .csaid{font-size:14px;color:#b9c9ea;max-width:80%;text-align:center;min-height:20px;line-height:1.5}
 #call .cbtns{margin-top:18px}
 #call #hangup{background:#e0483f;color:#fff;border:none;border-radius:30px;padding:14px 46px;font-size:16px}
+#setp{position:fixed;inset:0;background:#0b1020f5;z-index:70;display:none;flex-direction:column;
+  padding-top:calc(env(safe-area-inset-top) + 8px)}
+#setp.on{display:flex}
+#setp .ph{display:flex;align-items:center;padding:8px 14px;gap:10px}
+#setp .ph b{flex:1;font-size:16px}
+#setp .body{flex:1;overflow-y:auto;padding:10px 14px 30px}
+#setp input[type=file]{font-size:13px;color:#9fb4e0}
+#setp img{max-width:120px;border-radius:10px}
 </style></head>
 <body>
 <div id="bgwrap"></div><div id="veil"></div>
 <div id="app">
-  <header><span class="dot"></span>大肥鱼<span class="sp"></span>
-    <button id="callBtn">📞</button><button id="memBtn">记忆</button><button id="clearBtn">清屏</button></header>
+  <header><span class="dot"></span><span id="brandName">AI</span><span class="sp"></span>
+    <button id="callBtn">📞</button><button id="setBtn">⚙</button>
+    <button id="memBtn">记忆</button><button id="clearBtn">清屏</button></header>
   <div id="log"></div>
   <div id="bar">
     <button id="img">🖼</button>
@@ -110,9 +120,25 @@ header button{font-size:13px;color:#9fb4e0;padding:4px 8px}
   <div class="body" id="pbody"></div>
 </div>
 <div id="tip"></div>
+<div id="setp">
+  <div class="ph"><b>外观设置</b><button class="btn" id="closeSet">关闭</button></div>
+  <div class="body">
+    <div class="card"><div class="t">她的名字</div>
+      <input id="setName" placeholder="比如：小鲸鱼">
+      <button class="btn" id="saveName">保存名字</button></div>
+    <div class="card"><div class="t">她的头像</div>
+      <div style="font-size:12px;color:#7d8db3;margin-bottom:8px">正方形最好，会自动裁成圆</div>
+      <input type="file" id="pickAvatar" accept="image/*">
+      <div id="avPrev" style="margin-top:8px"></div></div>
+    <div class="card"><div class="t">聊天背景</div>
+      <div style="font-size:12px;color:#7d8db3;margin-bottom:8px">竖图最好，完整显示不裁切</div>
+      <input type="file" id="pickWall" accept="image/*">
+      <div id="wpPrev" style="margin-top:8px"></div></div>
+  </div>
+</div>
 <div id="call">
   <img class="cav" src="/static/icon-512.png">
-  <div class="cname">大肥鱼</div>
+  <div class="cname">你的角色</div>
   <div class="cstat" id="cstat">未连接</div>
   <div class="cwave" id="cwave"></div>
   <div class="csaid" id="csaid"></div>
@@ -122,8 +148,27 @@ header button{font-size:13px;color:#9fb4e0;padding:4px 8px}
 </div>
 <input type="file" id="file" accept="image/*" style="display:none">
 <script>
+const BRAND={name:'AI', avatar:'', wallpaper:''};
+function svgAvatar(ch,color){
+  return 'data:image/svg+xml;utf8,'+encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="76" height="76"><rect width="76" height="76" rx="38" fill="'+color+'"/><text x="38" y="48" font-size="28" text-anchor="middle" fill="#fff" font-family="sans-serif">'+ch+'</text></svg>');
+}
+async function loadBrand(){
+  try{
+    const d=await (await apiFetch('/api/branding')).json();
+    if(d.name) BRAND.name=d.name;
+    if(d.avatar) BRAND.avatar=d.avatar;
+    if(d.wallpaper) BRAND.wallpaper=d.wallpaper;
+    if(BRAND.avatar) AV_HER=BRAND.avatar;
+    if(BRAND.wallpaper) document.documentElement.style.setProperty('--wall', `url('${BRAND.wallpaper}')`);
+    document.title=BRAND.name;
+    document.querySelector('header').firstChild;
+    const nameEl=document.getElementById('brandName'); if(nameEl) nameEl.textContent=BRAND.name;
+  }catch(e){}
+}
+
 // ---------- 访问口令 ----------
-const TOKEN_KEY='dafeiyu_token';
+const TOKEN_KEY='aicompanion_token';
 function getToken(){ return localStorage.getItem(TOKEN_KEY)||''; }
 function askToken(msg){
   const t=prompt(msg||'请输入访问口令');
@@ -132,12 +177,19 @@ function askToken(msg){
 async function apiFetch(url,opt){
   opt=opt||{}; opt.headers=Object.assign({}, opt.headers||{});
   const tk=getToken(); if(tk) opt.headers['X-Token']=tk;
-  const r=await fetch(url,opt);
-  if(r.status===401){ askToken('需要访问口令'); throw new Error('need token'); }
+  let r=await fetch(url,opt);
+  if(r.status===401){
+    const t=prompt('请输入访问口令（第一次用需要）');
+    if(t){
+      localStorage.setItem(TOKEN_KEY,t.trim());
+      opt.headers['X-Token']=t.trim();
+      r=await fetch(url,opt);
+    }
+  }
   return r;
 }
 
-const AV_HER='/static/icon-192.png';
+let AV_HER='';  // 由 /api/branding 注入
 const log=document.getElementById('log'),box=document.getElementById('box'),
       sendBtn=document.getElementById('send'),mic=document.getElementById('mic'),
       file=document.getElementById('file'),tip=document.getElementById('tip');
@@ -147,9 +199,9 @@ function showTip(t,ms){tip.textContent=t;tip.style.display='block';
 function mkRow(who){
   const row=document.createElement('div');row.className='row '+(who==='me'?'me':'');
   const av=document.createElement('img');av.className='av';
-  av.src=who==='me'?'data:image/svg+xml;utf8,'+encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" width="76" height="76"><rect width="76" height="76" rx="38" fill="#2f6bff"/><text x="38" y="48" font-size="30" text-anchor="middle" fill="#fff" font-family="sans-serif">我</text></svg>')
-    :AV_HER;
+  const letter = who==='me' ? '我' : (BRAND.name||'AI').slice(0,1);
+  const color = who==='me' ? '#2f6bff' : '#3a4a7a';
+  av.src = who==='me' ? svgAvatar(letter,color) : (AV_HER || svgAvatar(letter,color));
   const b=document.createElement('div');b.className='bub '+(who==='me'?'me':'her');
   row.appendChild(av);row.appendChild(b);log.appendChild(row);scroll();
   return b;
@@ -280,11 +332,12 @@ document.getElementById('clearBtn').onclick=async()=>{if(!confirm('清掉本地�
   await apiFetch('/api/clear',{method:'POST'});log.innerHTML='';};
 // 载入历史
 (async()=>{
-  const d=await (await apiFetch('/api/history')).json();
+  try{ const d=await (await apiFetch('/api/history')).json();
   (d.messages||[]).forEach(m=>{
     if(m.role==='user')textBubble('me',m.content);
     else textBubble('her',m.content);
   });scroll();
+  }catch(e){}
 })();
 // 通知：页面在后台时轮询
 if('Notification' in window && Notification.permission==='default'){Notification.requestPermission();}
@@ -292,7 +345,7 @@ setInterval(async()=>{
   try{const d=await (await apiFetch('/api/pending')).json();
     (d.items||[]).forEach(it=>{
       if('Notification' in window && Notification.permission==='granted')
-        new Notification('大肥鱼',{body:it.text,icon:AV_HER});
+        new Notification('你的角色',{body:it.text,icon:AV_HER});
     });}catch(e){}
 },30000);
 
@@ -476,4 +529,40 @@ document.body.addEventListener('click', ()=>{
 apiFetch('/api/auth').then(r=>r.json()).then(d=>{
   if(d.auth_required && !d.ok) askToken('这个 App 设了访问口令');
 }).catch(()=>{});
+
+// ---------- 外观设置 ----------
+const setp=document.getElementById('setp');
+document.getElementById('setBtn').onclick=()=>{ setp.classList.add('on');
+  document.getElementById('setName').value=BRAND.name||'';
+  document.getElementById('avPrev').innerHTML = BRAND.avatar? `<img src="${BRAND.avatar}">`:'';
+  document.getElementById('wpPrev').innerHTML = BRAND.wallpaper? `<img src="${BRAND.wallpaper}" style="max-width:180px">`:'';
+};
+document.getElementById('closeSet').onclick=()=>setp.classList.remove('on');
+
+async function saveBrand(kind, dataUrl){
+  const r=await apiFetch('/api/branding/upload',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({kind,image:dataUrl})});
+  const d=await r.json();
+  if(d.ok){ await loadBrand(); showTip('已更新'); }
+  else showTip('上传失败');
+}
+document.getElementById('pickAvatar').onchange=function(){
+  const f=this.files[0]; if(!f)return; const rd=new FileReader();
+  rd.onload=()=>{ document.getElementById('avPrev').innerHTML=`<img src="${rd.result}">`;
+                  saveBrand('avatar', rd.result); };
+  rd.readAsDataURL(f); this.value='';
+};
+document.getElementById('pickWall').onchange=function(){
+  const f=this.files[0]; if(!f)return; const rd=new FileReader();
+  rd.onload=()=>{ document.getElementById('wpPrev').innerHTML=`<img src="${rd.result}" style="max-width:180px">`;
+                  saveBrand('wallpaper', rd.result); };
+  rd.readAsDataURL(f); this.value='';
+};
+document.getElementById('saveName').onclick=async ()=>{
+  const nm=document.getElementById('setName').value.trim(); if(!nm)return;
+  await apiFetch('/api/branding/name',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({name:nm})});
+  await loadBrand(); showTip('名字已改');
+};
+loadBrand();
 </script></body></html>

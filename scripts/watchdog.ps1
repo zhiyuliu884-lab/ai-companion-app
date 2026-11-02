@@ -4,7 +4,7 @@ $ErrorActionPreference = "Continue"
 $log = Join-Path $PSScriptRoot "watchdog.log"
 
 $PY      = "C:\path\to\venv\Scripts\python.exe"
-$APPDIR  = "C:\path\to\dafeiyu-app\server"
+$APPDIR  = "C:\path\to\ai-companion-app\server"
 $PORT    = 6191
 $TUNNEL  = "C:\path\to\cloudflared.exe"   # 不用外网可留空
 
@@ -14,7 +14,7 @@ function Alive($u) { try { (Invoke-WebRequest $u -TimeoutSec 6 -UseBasicParsing)
 if (-not (Alive "http://127.0.0.1:$PORT/api/health")) {
     Log "后端挂了，重启"
     Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
-        Where-Object { $_.CommandLine -like "*dafeiyu-app*" } |
+        Where-Object { $_.CommandLine -like "*ai-companion-app*" } |
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
     Start-Sleep 2
     Start-Process $PY -ArgumentList "-u", "$APPDIR\app.py" -WorkingDirectory $APPDIR -WindowStyle Hidden `

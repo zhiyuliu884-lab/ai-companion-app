@@ -1,4 +1,4 @@
-"""大肥鱼手机 App 后端（可开源版）
+"""你的角色手机 App 后端（可开源版）
 
 一个"给 AI 角色做个手机聊天 App"的通用后端：
   - 聊天（流式输出）
@@ -39,7 +39,7 @@ DEFAULTS = {
     "host": "0.0.0.0",
     "access_token": "",
     "persona": {
-        "name": "大肥鱼",
+        "name": "你的角色",
         "source": "file",            # file | astrbot_db
         "file": "persona.txt",       # source=file 时读取的文本文件（相对仓库根）
         "astrbot_db": "",            # source=astrbot_db 时，AstrBot 的 data_v4.db 路径
@@ -125,6 +125,8 @@ _ad = CFG.get("assets_dir") or "assets"
 ASSETS = _ad if os.path.isabs(_ad) else os.path.normpath(os.path.join(_repo, _ad))
 _ld = MEM_CFG.get("local_db") or "data/chat.db"
 LOCAL_DB = _ld if os.path.isabs(_ld) else os.path.normpath(os.path.join(_repo, _ld))
+BRAND_DIR = os.path.normpath(os.path.join(_repo, CFG.get("branding", {}).get("dir", "data/branding")))
+os.makedirs(BRAND_DIR, exist_ok=True)
 TOKEN = (CFG.get("access_token") or "").strip()
 PORT = int(CFG.get("port") or 6191)
 HOST = CFG.get("host") or "0.0.0.0"
@@ -496,6 +498,60 @@ def post_process(raw: str, text: str) -> dict:
             "emotion": pick_emotion(reply)}
 
 
+# ------------------------------------------------------------------ 品牌素材（用户自传）
+def _find_brand(name: str) -> str | None:
+    for ext in ("png", "jpg", "jpeg", "webp"):
+        fp = os.path.join(BRAND_DIR, f"{name}.{ext}")
+        if os.path.exists(fp):
+            return fp
+    return None
+
+
+def brand_name() -> str:
+    fp = os.path.join(BRAND_DIR, "name.txt")
+    if os.path.exists(fp):
+        return open(fp, encoding="utf-8").read().strip() or PERSONA_CFG.get("name", "AI")
+    return PERSONA_CFG.get("name", "AI")
+
+
+def brand_info() -> dict:
+    ver = int(time.time())
+    av, wp = _find_brand("avatar"), _find_brand("wallpaper")
+    return {
+        "name": brand_name(),
+        "avatar": f"/static/custom/avatar?v={ver}" if av else "",
+        "wallpaper": f"/static/custom/wallpaper?v={ver}" if wp else "",
+    }
+
+
+def save_brand(kind: str, data_url: str) -> bool:
+    if kind not in ("avatar", "wallpaper"):
+        return False
+    try:
+        head, b64 = data_url.split(",", 1) if "," in data_url else ("", data_url)
+        raw = base64.b64decode(b64)
+        from PIL import Image
+        import io as _io
+
+        img = Image.open(_io.BytesIO(raw)).convert("RGB")
+        if kind == "avatar":
+            side = min(img.size)
+            img = img.crop(((img.width - side) // 2, (img.height - side) // 2,
+                            (img.width + side) // 2, (img.height + side) // 2))
+            img = img.resize((512, 512), Image.LANCZOS)
+        else:
+            img.thumbnail((1440, 2560), Image.LANCZOS)
+        for ext in ("png", "jpg", "jpeg", "webp"):
+            old = os.path.join(BRAND_DIR, f"{kind}.{ext}")
+            if os.path.exists(old):
+                os.remove(old)
+        img.save(os.path.join(BRAND_DIR, f"{kind}.jpg"), "JPEG", quality=88)
+        return True
+    except Exception:
+        traceback.print_exc()
+        return False
+
+
 # ------------------------------------------------------------------ 鉴权
 def check_token(handler) -> bool:
     if not TOKEN:
@@ -508,7 +564,7 @@ def check_token(handler) -> bool:
         cookie = handler.headers.get("Cookie") or ""
         for part in cookie.split(";"):
             k, _, v = part.strip().partition("=")
-            if k == "dafeiyu_token":
+            if k == "aicompanion_token":
                 got = v
     return got == TOKEN
 
@@ -551,6 +607,13 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path in ("/", "/index.html"):
                 self._file(os.path.join(ROOT, "page.html"), "text/html; charset=utf-8")
+            elif path.startswith("/static/custom/"):
+                kind = "avatar" if "avatar" in path else "wallpaper"
+                fp = _find_brand(kind)
+                if not fp:
+                    self._json(404, {"error": "no custom asset"})
+                    return
+                self._file(fp, "image/jpeg", "public, max-age=60")
             elif path.startswith("/static/"):
                 fn = os.path.basename(path)
                 fp = os.path.join(ASSETS, fn)
@@ -562,30 +625,34 @@ class Handler(BaseHTTPRequestHandler):
                          else "application/octet-stream")
                 self._file(fp, ctype, "public, max-age=300")
             elif path == "/apk":
-                apk = os.path.normpath(os.path.join(os.path.dirname(ROOT), "Dafeiyu.apk"))
+                apk = os.path.normpath(os.path.join(os.path.dirname(ROOT), "AiCompanion.apk"))
                 if not os.path.exists(apk):
                     self._json(404, {"error": "apk not built"})
                     return
                 data = open(apk, "rb").read()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/vnd.android.package-archive")
-                self.send_header("Content-Disposition", 'attachment; filename="Dafeiyu.apk"')
+                self.send_header("Content-Disposition", 'attachment; filename="AiCompanion.apk"')
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
                 self.wfile.write(data)
             elif path == "/manifest.json":
+                _b = brand_info()
+                _icons = ([{"src": _b["avatar"], "sizes": "512x512", "type": "image/jpeg"}]
+                          if _b["avatar"] else [])
                 self._json(200, {
-                    "name": PERSONA_CFG.get("name", "AI"), "short_name": PERSONA_CFG.get("name", "AI"),
+                    "name": _b["name"], "short_name": _b["name"],
                     "start_url": "/", "display": "standalone",
                     "background_color": "#0b1020", "theme_color": "#0b1020",
-                    "icons": [{"src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png"},
-                              {"src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png"}]})
+                    "icons": _icons})
             elif path == "/api/health":
                 self._json(200, {"ok": True, "persona_len": len(PERSONA), "model": LLM["model"],
                                  "tts": bool(TTS_CFG.get("endpoint")),
                                  "image": bool(IMG_CFG.get("endpoint")),
                                  "shared_memory": lm_enabled(),
                                  "auth": bool(TOKEN)})
+            elif path == "/api/branding":
+                self._json(200, {"ok": True, **brand_info()})
             elif path == "/api/auth":
                 self._json(200, {"ok": check_token(self), "auth_required": bool(TOKEN)})
             elif path == "/api/history":
@@ -718,6 +785,14 @@ class Handler(BaseHTTPRequestHandler):
                 out = post_process("".join(llm_stream(_messages(heard))), heard)
                 out["heard"] = heard
                 self._json(200, out)
+            elif path == "/api/branding/upload":
+                ok = save_brand(payload.get("kind", ""), payload.get("image", ""))
+                self._json(200, {"ok": ok, **brand_info()})
+            elif path == "/api/branding/name":
+                nm = (payload.get("name") or "").strip()[:24]
+                if nm:
+                    open(os.path.join(BRAND_DIR, "name.txt"), "w", encoding="utf-8").write(nm)
+                self._json(200, {"ok": True, **brand_info()})
             elif path == "/api/memory/remember":
                 lm_write(f"[手动记录 {time.strftime('%Y-%m-%d %H:%M')}] "
                          f"{(payload.get('text') or '')[:400]}")

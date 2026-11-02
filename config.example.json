@@ -3,7 +3,7 @@
   "host": "0.0.0.0",
   "access_token": "换成你自己的口令",
   "persona": {
-    "name": "大肥鱼",
+    "name": "你的角色",
     "source": "file",
     "file": "persona.txt",
     "astrbot_db": ""

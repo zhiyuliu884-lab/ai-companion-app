@@ -7,8 +7,8 @@
 ## 一、改三处再打包
 
 ```
-1. app/src/main/AndroidManifest.xml    → package="com.你的名字.dafeiyu"
-2. app/src/main/java/com/example/dafeiyu/*.java   → 第一行 package 同步改
+1. app/src/main/AndroidManifest.xml    → package="com.你的名字.aicompanion"
+2. app/src/main/java/com/example/aicompanion/*.java   → 第一行 package 同步改
 3. MainActivity.java 里的 DEFAULT_URL   → 换成你的公网地址
 ```
 
@@ -69,10 +69,10 @@ Copy-Item build\app-unsigned.apk build\app-dex.apk
 
 # 4) 对齐 + 签名
 & "$BT\zipalign.exe" -f 4 build\app-dex.apk build\app-aligned.apk
-keytool -genkeypair -keystore my.jks -alias dafeiyu -keyalg RSA -keysize 2048 -validity 10000 `
+keytool -genkeypair -keystore my.jks -alias aicompanion -keyalg RSA -keysize 2048 -validity 10000 `
         -storepass 你的密码 -keypass 你的密码 -dname "CN=Me"
 & "$BT\apksigner.bat" sign --ks my.jks --ks-pass pass:你的密码 --key-pass pass:你的密码 `
-   --out Dafeiyu.apk build\app-aligned.apk
+   --out AiCompanion.apk build\app-aligned.apk
 ```
 
 > `my.jks` 千万别提交到仓库，丢了就没法覆盖升级已装的 App。

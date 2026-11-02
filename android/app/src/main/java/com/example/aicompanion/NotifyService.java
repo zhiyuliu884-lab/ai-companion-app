@@ -1,4 +1,4 @@
-﻿package com.example.dafeiyu;
+﻿package com.example.aicompanion;
 
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -24,8 +24,8 @@ import java.net.URL;
 /** 后台轮询她有没有主动发消息，有就弹通知。 */
 public class NotifyService extends Service {
 
-    private static final String CHANNEL = "dafeiyu_msg";
-    private static final String CHANNEL_SVC = "dafeiyu_svc";
+    private static final String CHANNEL = "aicompanion_msg";
+    private static final String CHANNEL_SVC = "aicompanion_svc";
     private volatile boolean running = true;
     private Thread worker;
 
@@ -54,7 +54,7 @@ public class NotifyService extends Service {
 
     private void startForegroundQuietly() {
         try {
-            Notification n = build("大肥鱼", "在后台陪着你", CHANNEL_SVC, false);
+            Notification n = build("你的角色", "在后台陪着你", CHANNEL_SVC, false);
             startForeground(1, n);
         } catch (Exception ignored) {
         }
@@ -76,7 +76,7 @@ public class NotifyService extends Service {
     }
 
     private String baseUrl() {
-        SharedPreferences sp = getSharedPreferences("dafeiyu", MODE_PRIVATE);
+        SharedPreferences sp = getSharedPreferences("aicompanion", MODE_PRIVATE);
         return sp.getString("url", MainActivity.DEFAULT_URL);
     }
 
@@ -102,7 +102,7 @@ public class NotifyService extends Service {
                         if (!text.isEmpty()) {
                             NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
                             nm.notify((int) (System.currentTimeMillis() % 100000),
-                                    build("大肥鱼", text, CHANNEL, true));
+                                    build("你的角色", text, CHANNEL, true));
                         }
                     }
                 }

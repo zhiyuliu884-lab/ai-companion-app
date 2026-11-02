@@ -9,7 +9,7 @@ data/
 *.log
 
 # 打包产物
-Dafeiyu.apk
+AiCompanion.apk
 *.apk
 *.jks
 *.keystore
