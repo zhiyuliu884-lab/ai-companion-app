@@ -30,7 +30,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-CFG_PATH = os.environ.get("DAFEIYU_CONFIG") or os.path.join(ROOT, "..", "config.json")
+CFG_PATH = os.environ.get("AC_CONFIG") or os.path.join(ROOT, "..", "config.json")
 
 
 # ------------------------------------------------------------------ 配置
@@ -97,13 +97,13 @@ def load_config() -> dict:
     if os.path.exists(CFG_PATH):
         cfg = _deep_merge(DEFAULTS, json.load(open(CFG_PATH, encoding="utf-8-sig")))
     for env, path in (
-        ("DAFEIYU_TOKEN", ("access_token",)),
-        ("DAFEIYU_LLM_KEY", ("llm", "api_key")),
-        ("DAFEIYU_LLM_BASE", ("llm", "base_url")),
-        ("DAFEIYU_LLM_MODEL", ("llm", "model")),
-        ("DAFEIYU_TTS", ("tts", "endpoint")),
-        ("DAFEIYU_IMAGE", ("image", "endpoint")),
-        ("DAFEIYU_PORT", ("port",)),
+        ("AC_TOKEN", ("access_token",)),
+        ("AC_LLM_KEY", ("llm", "api_key")),
+        ("AC_LLM_BASE", ("llm", "base_url")),
+        ("AC_LLM_MODEL", ("llm", "model")),
+        ("AC_TTS", ("tts", "endpoint")),
+        ("AC_IMAGE", ("image", "endpoint")),
+        ("AC_PORT", ("port",)),
     ):
         val = os.environ.get(env)
         if val:
