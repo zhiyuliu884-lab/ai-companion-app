@@ -413,13 +413,31 @@ def tts_b64(text: str, fast: bool = False) -> str | None:
 
 
 # ------------------------------------------------------------------ 画图 / 表情
-_DRAW_RE = re.compile(r"\[draw\](.*?)(?:\[/draw\]|$)", re.S)
-_MEME_RE = re.compile(r"\[meme\](.*?)(?:\[/meme\]|$)", re.S)
+_DRAW_RE = re.compile(r"\[draw\](.*?)(?:\[/draw\]|</draw[>\]]|$)", re.S)
+_MEME_RE = re.compile(r"\[meme\](.*?)(?:\[/meme\]|</meme[>\]]|$)", re.S)
 _CLEAN = re.compile(r"\[\[.*?\]\]|【[^】]{0,6}】|<[^>]{1,30}>")
+
+# 有些模型会把内部审核记录直接吐进正文，整段切掉
+SAFETY_MARK = re.compile(r"用户未成年|露骨色情|ds_safety", re.I)
+SAFETY_END = re.compile(
+    r"(?:safe(?:ty)?|CFT|安全规则|规则)[^，,。\n]{0,14}[，,。:：、]?", re.I)
+
+
+def strip_safety(text: str) -> str:
+    head = (text or "")[:260]
+    if not SAFETY_MARK.search(head):
+        return text
+    last = None
+    for m in SAFETY_END.finditer(head):
+        last = m
+    if last is None:
+        return ""
+    return text[last.end():].lstrip("，,。:：、 \t\n")
 
 
 def clean_reply(t: str) -> str:
-    t = _DRAW_RE.sub("", t or "")
+    t = strip_safety(t or "")
+    t = _DRAW_RE.sub("", t)
     t = _MEME_RE.sub("", t)
     return _CLEAN.sub("", t).strip()
 
@@ -762,11 +780,23 @@ class Handler(BaseHTTPRequestHandler):
                     {"type": "image_url", "image_url": {"url": payload["image"]}}]})
                 hist_add("user", f"[图片] {text}")
                 self._json(200, post_process(llm_once(msgs, 700), text))
+            elif path == "/api/idle_talk":
+                ctx = "\n".join(f"{m['role']}：{m['content'][:60]}" for m in hist_tail(6))
+                line = clean_reply(llm_once([
+                    {"role": "system", "content": PERSONA[:1200] +
+                     "\n【现在是打电话，对面安静了一会儿。你自己说一句，一到两句，"
+                     "随便聊点什么，别问「还在吗」。】"},
+                    {"role": "user", "content": "最近的对话：\n" + ctx}], 120))
+                if not line:
+                    self._json(200, {"ok": False})
+                    return
+                hist_add("assistant", line)
+                self._json(200, {"ok": True, "reply": line, "audio": tts_b64(line, fast=True)})
             elif path == "/api/tts":
                 txt = (payload.get("text") or "").strip()
                 self._json(200, {"ok": True, "audio": tts_b64(txt, fast=bool(payload.get("fast")))})
             elif path == "/api/stt":
-                heard = stt(payload.get("audio") or "")
+                heard = stt(payload.get("audio") or "", fast=bool(payload.get("fast")))
                 self._json(200, {"ok": bool(heard), "text": heard})
             elif path == "/api/voice":
                 call_mode = bool(payload.get("call"))
@@ -825,14 +855,34 @@ class Handler(BaseHTTPRequestHandler):
 _whisper = None
 
 
-def stt(data_url: str) -> str:
-    global _whisper
+_whisper_fast = None
+_HEARD_JUNK = ("中文普通话", "日常聊天", "说话人叫", "AI 角色叫", "以下是", "字幕",
+               "请不吝点赞", "订阅", "打赏")
+
+
+def _clean_heard(t: str) -> str:
+    t = (t or "").strip()
+    if not t:
+        return ""
+    for j in _HEARD_JUNK:
+        if j in t and len(t) <= 40:
+            return ""
+    return t.strip(" ，。,.、\n")
+
+
+def stt(data_url: str, fast: bool = False) -> str:
+    global _whisper, _whisper_fast
     if not data_url or not CFG["stt"].get("enabled", True):
         return ""
-    if _whisper is None:
-        from faster_whisper import WhisperModel
-
-        _whisper = WhisperModel(CFG["stt"].get("model", "base"), device="cpu", compute_type="int8")
+    from faster_whisper import WhisperModel as _WM
+    if fast:
+        if _whisper_fast is None:
+            _whisper_fast = _WM("base", device="cpu", compute_type="int8")
+        model = _whisper_fast
+    else:
+        if _whisper is None:
+            _whisper = _WM(CFG["stt"].get("model", "small"), device="cpu", compute_type="int8")
+        model = _whisper
     import numpy as np
 
     head, b64 = data_url.split(",", 1) if "," in data_url else ("", data_url)
@@ -847,8 +897,10 @@ def stt(data_url: str) -> str:
     audio = np.fromfile(pcm, dtype=np.int16).astype(np.float32) / 32768.0
     if audio.size == 0:
         return ""
-    segs, _ = _whisper.transcribe(audio, language="zh", vad_filter=True)
-    return "".join(s.text for s in segs).strip()
+    segs, _ = model.transcribe(audio, language="zh", vad_filter=True,
+                               beam_size=5, condition_on_previous_text=False,
+                               vad_parameters={"min_silence_duration_ms": 400})
+    return _clean_heard("".join(sx.text for sx in segs))
 
 
 def warm_stt():
