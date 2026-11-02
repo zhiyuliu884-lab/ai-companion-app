@@ -1,0 +1,49 @@
+{
+  "port": 6191,
+  "host": "0.0.0.0",
+  "access_token": "换成你自己的口令",
+  "persona": {
+    "name": "你的角色",
+    "source": "file",
+    "file": "persona.txt",
+    "astrbot_db": ""
+  },
+  "llm": {
+    "base_url": "https://api.deepseek.com/v1",
+    "api_key": "sk-你的密钥",
+    "model": "deepseek-chat",
+    "temperature": 0.9,
+    "max_tokens": 800,
+    "call_max_tokens": 120
+  },
+  "tts": {
+    "endpoint": "",
+    "emotion_enabled": true
+  },
+  "image": {
+    "endpoint": "",
+    "identity_prefix": "",
+    "model": "anime"
+  },
+  "stt": {
+    "enabled": true,
+    "model": "base",
+    "ffmpeg": "ffmpeg"
+  },
+  "memory": {
+    "astrbot_livingmemory_db": "",
+    "local_db": "data/chat.db",
+    "recall_pool": 1500
+  },
+  "meme_dir": "",
+  "assets_dir": "assets",
+  "proactive": {
+    "enabled": true,
+    "idle_minutes": 30,
+    "interval_minutes": 10,
+    "active_hours": [
+      8,
+      23
+    ]
+  }
+}
