@@ -4,7 +4,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0b1020">
-<title>大肥鱼</title>
+<title>AI</title>
 <link rel="manifest" href="/manifest.json">
 <link rel="apple-touch-icon" href="/static/icon-180.png">
 <link rel="icon" href="/static/icon-192.png">
@@ -121,7 +121,7 @@ header button{font-size:13px;color:#9fb4e0;padding:4px 8px}
 <body>
 <div id="bgwrap"></div><div id="veil"></div>
 <div id="app">
-  <header><span class="dot"></span>大肥鱼<span class="sp"></span>
+  <header><span class="dot"></span><span id="brandName">AI</span><span class="sp"></span>
     <button id="callBtn">📞</button><button id="setBtn">⚙</button><button id="memBtn">记忆</button><button id="clearBtn">清屏</button></header>
   <div id="log"></div>
   <div id="bar">
@@ -190,7 +190,7 @@ header button{font-size:13px;color:#9fb4e0;padding:4px 8px}
 <div id="ring">
   <img class="rav" src="/static/icon-512.png">
   <div class="rt">来电</div>
-  <div class="rn" id="ringName">大肥鱼</div>
+  <div class="rn" id="ringName">AI</div>
   <div class="rs" id="ringLine">……</div>
   <div class="rbtns">
     <button id="rejectCall" class="rno">挂断</button>
@@ -199,7 +199,7 @@ header button{font-size:13px;color:#9fb4e0;padding:4px 8px}
 </div>
 <div id="call">
   <img class="cav" src="/static/icon-512.png">
-  <div class="cname">大肥鱼</div>
+  <div class="cname" id="callName">AI</div>
   <div class="cstat" id="cstat">未连接</div>
   <div class="cwave" id="cwave"></div>
   <div class="csaid" id="csaid"></div>
@@ -234,7 +234,7 @@ async function apiFetch(url,opt){
   return r;
 }
 
-const AV_HER='/static/icon-192.png';
+let AV_HER='/static/icon-192.png';
 const log=document.getElementById('log'),box=document.getElementById('box'),
       sendBtn=document.getElementById('send'),mic=document.getElementById('mic'),
       file=document.getElementById('file'),tip=document.getElementById('tip');
@@ -462,7 +462,7 @@ setInterval(async()=>{
   try{const d=await (await apiFetch('/api/pending?ack=1')).json();
     (d.items||[]).forEach(it=>{
       if('Notification' in window && Notification.permission==='granted')
-        new Notification('大肥鱼',{body:it.text,icon:AV_HER});
+        new Notification(BRAND.name||'AI',{body:it.text,icon:AV_HER});
     });}catch(e){}
 },30000);
 
@@ -678,7 +678,7 @@ document.body.addEventListener('click', ()=>{
 
 
 // ---------- 品牌信息（名字/头像/壁纸）----------
-const BRAND={name:'大肥鱼', avatar:'', wallpaper:''};
+const BRAND={name:'AI', avatar:'', wallpaper:''};
 function svgAvatar(ch,color){
   return 'data:image/svg+xml;utf8,'+encodeURIComponent(
     '<svg xmlns="http://www.w3.org/2000/svg" width="76" height="76"><rect width="76" height="76" rx="38" fill="'+color+'"/><text x="38" y="48" font-size="28" text-anchor="middle" fill="#fff" font-family="sans-serif">'+ch+'</text></svg>');
@@ -693,6 +693,8 @@ async function loadBrand(){
     if(d && d.wallpaper){ BRAND.wallpaper = d.wallpaper;
       document.documentElement.style.setProperty('--wall', `url('${d.wallpaper}')`); }
     document.title = BRAND.name;
+    var bn = document.getElementById('brandName'); if(bn) bn.textContent = BRAND.name;
+    var cn = document.getElementById('callName'); if(cn) cn.textContent = BRAND.name;
   }catch(e){}
 }
 // ---------- 口令门 ----------

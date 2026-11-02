@@ -180,6 +180,8 @@ def _db() -> sqlite3.Connection:
     con = sqlite3.connect(LOCAL_DB, timeout=10)
     con.execute("CREATE TABLE IF NOT EXISTS msgs (id INTEGER PRIMARY KEY AUTOINCREMENT,"
                 " role TEXT, content TEXT, ts REAL)")
+    con.execute("CREATE TABLE IF NOT EXISTS memory (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                " text TEXT, ts REAL)")
     return con
 
 
@@ -284,10 +286,13 @@ def memory_rows(limit: int = 80) -> list[dict]:
             return [{"id": r[0], "text": (r[1] or "")[:300], "time": str(r[2])} for r in rows]
         except Exception:
             pass
-    con = _db()
-    rows = con.execute("SELECT id, text, ts FROM memory ORDER BY id DESC LIMIT ?",
-                       (limit,)).fetchall()
-    con.close()
+    try:
+        con = _db()
+        rows = con.execute("SELECT id, text, ts FROM memory ORDER BY id DESC LIMIT ?",
+                           (limit,)).fetchall()
+        con.close()
+    except Exception:
+        return []
     return [{"id": r[0], "text": (r[1] or "")[:300],
              "time": time.strftime("%Y-%m-%d %H:%M", time.localtime(r[2] or 0))} for r in rows]
 
@@ -782,11 +787,16 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, post_process(llm_once(msgs, 700), text))
             elif path == "/api/idle_talk":
                 ctx = "\n".join(f"{m['role']}：{m['content'][:60]}" for m in hist_tail(6))
-                line = clean_reply(llm_once([
+                try:
+                    line = clean_reply(llm_once([
                     {"role": "system", "content": PERSONA[:1200] +
                      "\n【现在是打电话，对面安静了一会儿。你自己说一句，一到两句，"
                      "随便聊点什么，别问「还在吗」。】"},
-                    {"role": "user", "content": "最近的对话：\n" + ctx}], 120))
+                        {"role": "user", "content": "最近的对话：\n" + ctx}], 120))
+                except Exception as exc:  # noqa: BLE001
+                    traceback.print_exc()
+                    self._json(200, {"ok": False, "error": friendly_llm_error(exc)})
+                    return
                 if not line:
                     self._json(200, {"ok": False})
                     return
