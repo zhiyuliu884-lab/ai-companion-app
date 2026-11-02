@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0b1020">
+<title>大肥鱼</title>
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/static/icon-180.png">
+<link rel="icon" href="/static/icon-192.png">
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:#0b1020;color:#e8eefc;
+  font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;overscroll-behavior:none}
+#bgwrap{position:fixed;inset:0;z-index:0;background:#0b1020;overflow:hidden}
+#bgwrap::before{content:'';position:absolute;inset:-40px;background:url('/static/wallpaper.jpg?v=3') center/cover no-repeat;
+  filter:blur(26px) brightness(.42) saturate(.9)}
+#bgwrap::after{content:'';position:absolute;inset:0;background:url('/static/wallpaper.jpg?v=3') center top/contain no-repeat}
+#veil{position:fixed;inset:0;z-index:0;background:linear-gradient(180deg,rgba(6,10,22,.35),rgba(6,10,22,.6))}
+#app{display:flex;flex-direction:column;height:100dvh;position:relative;z-index:1}
+header{padding:calc(env(safe-area-inset-top) + 10px) 14px 10px;font-size:15px;
+  background:rgba(17,26,51,.7);backdrop-filter:blur(10px);border-bottom:1px solid rgba(29,42,74,.7);
+  display:flex;align-items:center;gap:8px}
+header .dot{width:8px;height:8px;border-radius:50%;background:#3ddc84}
+header .sp{flex:1}
+header button{font-size:13px;color:#9fb4e0;padding:4px 8px}
+#log{flex:1;overflow-y:auto;padding:14px 10px 6px;display:flex;flex-direction:column;gap:12px}
+.row{display:flex;gap:8px;align-items:flex-start;max-width:100%}
+.row.me{flex-direction:row-reverse}
+.av{width:38px;height:38px;border-radius:50%;flex:0 0 38px;object-fit:cover;
+  background:#1b2745;border:1px solid rgba(120,150,220,.35)}
+.bub{max-width:74%;padding:10px 13px;border-radius:16px;line-height:1.55;font-size:15.5px;
+  white-space:pre-wrap;word-break:break-word;position:relative}
+.bub.her{background:rgba(27,39,69,.86);backdrop-filter:blur(6px);border-bottom-left-radius:5px}
+.bub.me{background:rgba(47,107,255,.92);backdrop-filter:blur(6px);color:#fff;border-bottom-right-radius:5px}
+.bub img{max-width:100%;border-radius:10px;display:block}
+/* 语音条 */
+.voice{display:flex;align-items:center;gap:8px;min-width:96px;cursor:pointer;user-select:none}
+.voice .tri{width:0;height:0;border-left:9px solid #cfe0ff;border-top:6px solid transparent;
+  border-bottom:6px solid transparent;transition:.15s}
+.voice.playing .tri{border-left-color:#6f9bff;transform:scale(1.15)}
+.voice .wave{display:flex;align-items:center;gap:2px;height:16px}
+.voice .wave i{width:2px;background:#8fb0e8;border-radius:1px;display:block}
+.voice .dur{font-size:12px;color:#9fb4e0;margin-left:2px}
+.voice .txt{display:none;margin-top:6px;font-size:14px;line-height:1.5;color:#cfe0ff;
+  border-top:1px dashed rgba(140,170,230,.3);padding-top:6px}
+.voice.open + .txt,.bub.showtxt .txt{display:block}
+.bub audio{display:none}
+.time{font-size:11px;color:#5f6f92;margin:2px 46px 0;align-self:flex-start}
+#bar{padding:8px 10px calc(env(safe-area-inset-bottom) + 8px);
+  background:rgba(17,26,51,.72);backdrop-filter:blur(10px);border-top:1px solid rgba(29,42,74,.7);
+  display:flex;gap:8px;align-items:center}
+#bar button{background:none;border:none;color:#9fb4e0;font-size:21px;padding:6px;border-radius:12px}
+#bar button:active{background:#1b2745}
+#box{flex:1;background:#0e1830;border:1px solid #223255;border-radius:20px;padding:10px 14px;
+  color:#e8eefc;font-size:15.5px;resize:none;max-height:110px;outline:none;font-family:inherit}
+#send{background:#2f6bff;color:#fff;border-radius:20px;padding:9px 16px;font-size:15px;border:none}
+#send:disabled{opacity:.45}
+.recording{color:#ff5d5d!important}
+#tip{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);background:#000d;
+  padding:14px 20px;border-radius:14px;font-size:14px;display:none;z-index:99;max-width:80%}
+#panel{position:fixed;inset:0;background:#0b1020f2;z-index:50;display:none;flex-direction:column;
+  padding-top:calc(env(safe-area-inset-top) + 8px)}
+#panel.on{display:flex}
+#panel .ph{display:flex;align-items:center;padding:8px 14px;gap:10px}
+#panel .ph b{flex:1;font-size:16px}
+#panel .tabs{display:flex;gap:6px;padding:0 14px 8px;flex-wrap:wrap}
+#panel .tabs span{padding:6px 12px;border-radius:14px;background:#16203a;font-size:13px;color:#9fb4e0}
+#panel .tabs span.on{background:#2f6bff;color:#fff}
+#panel .body{flex:1;overflow-y:auto;padding:10px 14px 30px}
+.card{background:#131d35;border:1px solid #1e2c4c;border-radius:12px;padding:10px 12px;margin-bottom:8px}
+.card .t{font-size:11px;color:#5f6f92;margin-bottom:4px}
+.card .c{font-size:14px;line-height:1.5;white-space:pre-wrap}
+#panel input,#panel textarea{width:100%;background:#0e1830;border:1px solid #223255;border-radius:10px;
+  padding:10px;color:#e8eefc;font-size:14px;margin-bottom:8px;font-family:inherit}
+#panel .btn{background:#2f6bff;color:#fff;border:none;border-radius:10px;padding:9px 14px;font-size:14px}
+#call{position:fixed;inset:0;z-index:80;background:linear-gradient(180deg,#0a1226,#060a16);
+  display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px}
+#call.on{display:flex}
+#call .cav{width:130px;height:130px;border-radius:50%;object-fit:cover;
+  border:2px solid rgba(120,160,255,.5);box-shadow:0 0 40px rgba(60,110,255,.35)}
+#call .cname{font-size:19px;letter-spacing:1px}
+#call .cstat{font-size:13px;color:#8fa6d6}
+#call .cwave{height:40px;display:flex;align-items:center;gap:3px}
+#call .cwave i{width:3px;background:#5f8cff;border-radius:2px;opacity:.7;animation:cv .9s infinite ease-in-out}
+@keyframes cv{0%,100%{height:6px}50%{height:26px}}
+#call .csaid{font-size:14px;color:#b9c9ea;max-width:80%;text-align:center;min-height:20px;line-height:1.5}
+#call .cbtns{margin-top:18px}
+#call #hangup{background:#e0483f;color:#fff;border:none;border-radius:30px;padding:14px 46px;font-size:16px}
+</style></head>
+<body>
+<div id="bgwrap"></div><div id="veil"></div>
+<div id="app">
+  <header><span class="dot"></span>大肥鱼<span class="sp"></span>
+    <button id="callBtn">📞</button><button id="memBtn">记忆</button><button id="clearBtn">清屏</button></header>
+  <div id="log"></div>
+  <div id="bar">
+    <button id="img">🖼</button>
+    <button id="mic">🎤</button>
+    <textarea id="box" rows="1" placeholder="跟她说点什么…"></textarea>
+    <button id="send">发送</button>
+  </div>
+</div>
+<div id="panel">
+  <div class="ph"><b>她的记忆</b><button class="btn" id="closePanel">关闭</button></div>
+  <div class="tabs" id="tabs">
+    <span data-t="timeline" class="on">时间轴</span><span data-t="search">搜索</span>
+    <span data-t="remember">记一条</span><span data-t="summary">这周总结</span>
+  </div>
+  <div class="body" id="pbody"></div>
+</div>
+<div id="tip"></div>
+<div id="call">
+  <img class="cav" src="/static/icon-512.png">
+  <div class="cname">大肥鱼</div>
+  <div class="cstat" id="cstat">未连接</div>
+  <div class="cwave" id="cwave"></div>
+  <div class="csaid" id="csaid"></div>
+  <div class="cbtns">
+    <button id="hangup">挂断</button>
+  </div>
+</div>
+<input type="file" id="file" accept="image/*" style="display:none">
+<script>
+// ---------- 访问口令 ----------
+const TOKEN_KEY='dafeiyu_token';
+function getToken(){ return localStorage.getItem(TOKEN_KEY)||''; }
+function askToken(msg){
+  const t=prompt(msg||'请输入访问口令');
+  if(t){ localStorage.setItem(TOKEN_KEY,t.trim()); location.reload(); }
+}
+async function apiFetch(url,opt){
+  opt=opt||{}; opt.headers=Object.assign({}, opt.headers||{});
+  const tk=getToken(); if(tk) opt.headers['X-Token']=tk;
+  const r=await fetch(url,opt);
+  if(r.status===401){ askToken('需要访问口令'); throw new Error('need token'); }
+  return r;
+}
+
+const AV_HER='/static/icon-192.png';
+const log=document.getElementById('log'),box=document.getElementById('box'),
+      sendBtn=document.getElementById('send'),mic=document.getElementById('mic'),
+      file=document.getElementById('file'),tip=document.getElementById('tip');
+function scroll(){log.scrollTop=log.scrollHeight;}
+function showTip(t,ms){tip.textContent=t;tip.style.display='block';
+  clearTimeout(showTip.t);showTip.t=setTimeout(()=>tip.style.display='none',ms||1600);}
+function mkRow(who){
+  const row=document.createElement('div');row.className='row '+(who==='me'?'me':'');
+  const av=document.createElement('img');av.className='av';
+  av.src=who==='me'?'data:image/svg+xml;utf8,'+encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="76" height="76"><rect width="76" height="76" rx="38" fill="#2f6bff"/><text x="38" y="48" font-size="30" text-anchor="middle" fill="#fff" font-family="sans-serif">我</text></svg>')
+    :AV_HER;
+  const b=document.createElement('div');b.className='bub '+(who==='me'?'me':'her');
+  row.appendChild(av);row.appendChild(b);log.appendChild(row);scroll();
+  return b;
+}
+function textBubble(who,text){const b=mkRow(who);b.textContent=text;return b;}
+function imgBubble(who,src){const b=mkRow(who);const im=document.createElement('img');im.src=src;b.appendChild(im);return b;}
+function waveHtml(n){let h='<div class="wave">';for(let i=0;i<(n||5);i++){
+  const hh=4+Math.round(Math.random()*10);h+=`<i style="height:${hh}px"></i>`;}return h+'</div>';}
+function voiceBubble(text,audio,durSec){
+  const b=mkRow('her');
+  const v=document.createElement('div');v.className='voice';
+  v.innerHTML='<div class="tri"></div>'+waveHtml(6)+`<span class="dur">${durSec||Math.max(1,Math.round(text.length/4))}"</span>`;
+  b.appendChild(v);
+  const hidden=document.createElement('div');hidden.className='txt';hidden.textContent=text;b.appendChild(hidden);
+  const a=document.createElement('audio');a.src=audio;a.preload='auto';b.appendChild(a);
+  v.onclick=()=>{a.play().catch(()=>{});v.classList.add('playing');
+    setTimeout(()=>v.classList.remove('playing'),Math.max(1500,(durSec||4)*1000));};
+  let lp;const start=()=>{lp=setTimeout(()=>{b.classList.toggle('showtxt');},550);};
+  const cancel=()=>clearTimeout(lp);
+  v.addEventListener('touchstart',start,{passive:true});
+  v.addEventListener('touchend',cancel);
+  v.addEventListener('mousedown',start);
+  v.addEventListener('mouseup',cancel);
+  v.addEventListener('contextmenu',e=>{e.preventDefault();b.classList.toggle('showtxt');});
+  return b;
+}
+async function sayText(text){
+  if(!text.trim())return;
+  textBubble('me',text);box.value='';box.style.height='auto';sendBtn.disabled=true;
+  const b=mkRow('her');b.textContent='';
+  let raw='';
+  try{
+    const resp=await apiFetch('/api/stream?text='+encodeURIComponent(text));
+    const rd=resp.body.getReader();const dec=new TextDecoder();let buf='';
+    while(true){
+      const {done,value}=await rd.read();if(done)break;
+      buf+=dec.decode(value,{stream:true});
+      let i;
+      while((i=buf.indexOf('\n\n'))>=0){
+        const chunk=buf.slice(0,i);buf=buf.slice(i+2);
+        if(!chunk.startsWith('data:'))continue;
+        const ev=JSON.parse(chunk.slice(5).trim());
+        if(ev.type==='delta'){raw+=ev.t;b.textContent=clean(raw);scroll();}
+        else if(ev.type==='done'){
+          b.remove(); if(ev.audio){voiceBubble(ev.reply,ev.audio);} else {textBubble('her',ev.reply);}
+          (ev.images||[]).forEach(im=>imgBubble('her',im));
+          scroll();
+        } else if(ev.type==='error'){b.textContent='连不上她……';}
+      }
+    }
+  }catch(e){b.textContent='连不上她……';}
+  sendBtn.disabled=false;scroll();
+}
+function clean(t){return (t||'').replace(/\[draw\][\s\S]*?\[\/draw\]/g,'').replace(/\[meme\][\s\S]*?\[\/meme\]/g,'').replace(/【[^】]{0,6}】/g,'');}
+sendBtn.onclick=()=>sayText(box.value);
+box.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sayText(box.value);}});
+box.addEventListener('input',()=>{box.style.height='auto';box.style.height=Math.min(box.scrollHeight,110)+'px';});
+document.getElementById('img').onclick=()=>file.click();
+file.onchange=()=>{const f=file.files[0];if(!f)return;const rd=new FileReader();
+  rd.onload=async()=>{
+    imgBubble('me',rd.result);sendBtn.disabled=true;
+    const b=mkRow('her');b.textContent='……';
+    try{const r=await apiFetch('/api/image',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({image:rd.result,text:''})});const d=await r.json();
+      b.remove(); if(d.audio)voiceBubble(d.reply,d.audio); else textBubble('her',d.reply||'……');
+      (d.images||[]).forEach(im=>imgBubble('her',im));
+    }catch(e){b.textContent='连不上她……';}
+    sendBtn.disabled=false;};rd.readAsDataURL(f);file.value='';};
+let rec=null,chunks=[],recording=false;
+mic.onclick=async()=>{
+  if(!recording){
+    try{const s=await navigator.mediaDevices.getUserMedia({audio:true});
+      rec=new MediaRecorder(s);chunks=[];rec.ondataavailable=e=>chunks.push(e.data);
+      rec.onstop=async()=>{s.getTracks().forEach(t=>t.stop());
+        const blob=new Blob(chunks,{type:rec.mimeType||'audio/webm'});const rd=new FileReader();
+        rd.onload=async()=>{showTip('她说…',3000);
+          try{const r=await apiFetch('/api/voice',{method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({audio:rd.result})});const d=await r.json();
+            if(d.heard)textBubble('me','🎤 '+d.heard);
+            if(d.audio)voiceBubble(d.reply,d.audio);else if(d.reply)textBubble('her',d.reply);
+            else showTip(d.error||'没听清');
+            (d.images||[]).forEach(im=>imgBubble('her',im));
+          }catch(e){showTip('处理失败');}};
+        rd.readAsDataURL(blob);};
+      rec.start();recording=true;mic.classList.add('recording');showTip('录音中，再点一下结束',3000);
+    }catch(e){showTip('拿不到麦克风权限');}
+  }else{rec.stop();recording=false;mic.classList.remove('recording');tip.style.display='none';}
+};
+// 记忆面板
+const panel=document.getElementById('panel'),pbody=document.getElementById('pbody');
+document.getElementById('memBtn').onclick=()=>{panel.classList.add('on');loadTab('timeline');};
+document.getElementById('closePanel').onclick=()=>panel.classList.remove('on');
+document.getElementById('tabs').onclick=e=>{if(e.target.dataset.t){loadTab(e.target.dataset.t);
+  [...document.querySelectorAll('#tabs span')].forEach(s=>s.classList.toggle('on',s===e.target));}};
+async function loadTab(t){
+  pbody.innerHTML='<div class="card"><div class="c">加载中…</div></div>';
+  if(t==='timeline'){
+    const d=await (await apiFetch('/api/memory/timeline?days=7')).json();
+    pbody.innerHTML=(d.items||[]).map(x=>`<div class="card"><div class="t">${x.time}</div><div class="c">${esc(x.text)}</div></div>`).join('')||'<div class="card"><div class="c">这周还没什么记忆</div></div>';
+  }else if(t==='search'){
+    pbody.innerHTML=`<input id="mq" placeholder="搜点什么…"><button class="btn" id="mgo">搜索</button><div id="mres"></div>`;
+    document.getElementById('mgo').onclick=async()=>{
+      const q=document.getElementById('mq').value.trim();if(!q)return;
+      const d=await (await apiFetch('/api/memory/search?q='+encodeURIComponent(q))).json();
+      document.getElementById('mres').innerHTML=(d.items||[]).map(x=>
+        `<div class="card"><div class="t">${x.time} · 相关度${x.score}</div><div class="c">${esc(x.text)}</div>
+         <button class="btn" style="margin-top:6px;background:#a33" onclick="forget(${x.id})">忘掉这条</button></div>`).join('')||'<div class="card"><div class="c">没找到</div></div>';
+    };
+  }else if(t==='remember'){
+    pbody.innerHTML=`<textarea id="mr" rows="4" placeholder="要她记住的事，比如：我明天八点去海边"></textarea>
+      <button class="btn" id="mrok">让她记住</button>`;
+    document.getElementById('mrok').onclick=async()=>{
+      const v=document.getElementById('mr').value.trim();if(!v)return;
+      await apiFetch('/api/memory/remember',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({text:v})});
+      showTip('记住了');loadTab('timeline');
+    };
+  }else if(t==='summary'){
+    pbody.innerHTML='<div class="card"><div class="c">她正在回忆这一周…</div></div>';
+    const d=await (await apiFetch('/api/memory/summary',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})).json();
+    pbody.innerHTML=`<div class="card"><div class="c">${esc(d.summary||d.error||'没事可总结')}</div></div>`;
+  }
+}
+window.forget=async(id)=>{await apiFetch('/api/memory/forget',{method:'POST',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({id})});showTip('忘了');loadTab('search');};
+function esc(s){return (s||'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));}
+document.getElementById('clearBtn').onclick=async()=>{if(!confirm('清掉本地聊天记录？'))return;
+  await apiFetch('/api/clear',{method:'POST'});log.innerHTML='';};
+// 载入历史
+(async()=>{
+  const d=await (await apiFetch('/api/history')).json();
+  (d.messages||[]).forEach(m=>{
+    if(m.role==='user')textBubble('me',m.content);
+    else textBubble('her',m.content);
+  });scroll();
+})();
+// 通知：页面在后台时轮询
+if('Notification' in window && Notification.permission==='default'){Notification.requestPermission();}
+setInterval(async()=>{
+  try{const d=await (await apiFetch('/api/pending')).json();
+    (d.items||[]).forEach(it=>{
+      if('Notification' in window && Notification.permission==='granted')
+        new Notification('大肥鱼',{body:it.text,icon:AV_HER});
+    });}catch(e){}
+},30000);
+
+// ---------------- 打电话（流式：边说边生成边合成，可打断）----------------
+const callEl=document.getElementById('call'),cstat=document.getElementById('cstat'),
+      csaid=document.getElementById('csaid'),cwave=document.getElementById('cwave');
+let inCall=false, callStream=null, audioCtx=null, analyser=null,
+    callRec=null, callChunks=[], paused=false, playing=null;
+
+function waveBars(on){
+  cwave.innerHTML = on ? Array.from({length:14},()=>'<i style="animation-delay:'+
+    (Math.random()).toFixed(2)+'s"></i>').join('') : '';
+}
+function rmsOf(buf){
+  let sum=0; for(let i=0;i<buf.length;i++){ const v=(buf[i]-128)/128; sum+=v*v; }
+  return Math.sqrt(sum/buf.length);
+}
+async function startCall(){
+  inCall=true; paused=false; callEl.classList.add('on'); csaid.textContent='';
+  cstat.textContent='连接中…';
+  try{
+    callStream=await navigator.mediaDevices.getUserMedia(
+      {audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
+    audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+    const src=audioCtx.createMediaStreamSource(callStream);
+    analyser=audioCtx.createAnalyser(); analyser.fftSize=1024;
+    src.connect(analyser);
+    cstat.textContent='说吧，我听着';
+    listenLoop();
+  }catch(e){ cstat.textContent='拿不到麦克风'; }
+}
+function stopCall(){
+  inCall=false; callEl.classList.remove('on');
+  try{ if(playing){ playing.pause(); playing=null; } }catch(e){}
+  try{ if(callRec&&callRec.state==='recording') callRec.stop(); }catch(e){}
+  try{ callStream&&callStream.getTracks().forEach(t=>t.stop()); }catch(e){}
+  try{ audioCtx&&audioCtx.close(); }catch(e){}
+  waveBars(false); csaid.textContent='';
+}
+document.getElementById('callBtn').onclick=()=>startCall();
+document.getElementById('hangup').onclick=()=>stopCall();
+
+// 播放队列：句子一合成好就播
+function makePlayer(){
+  const q=[]; let running=false;
+  async function pump(){
+    if(running) return; running=true;
+    while(q.length){
+      const item=q.shift();
+      let url=item;
+      if(item && typeof item.then==='function'){ url=await item; }   // 等 Promise 解析成地址
+      if(!inCall){ running=false; return; }
+      if(!url){ continue; }
+      cstat.textContent='她说着…';
+      await new Promise(res=>{
+        const a=new Audio(url); playing=a;
+        a.onended=()=>{playing=null;res();};
+        a.onerror=()=>{playing=null;res();};
+        const pr=a.play();
+        if(pr&&pr.catch){ pr.catch(()=>{
+          // 自动播放被拦：提示点一下，下次点击时补播
+          window._pendingAudio=url; cstat.textContent='点一下屏幕开声音';
+          playing=null; res();
+        }); }
+      });
+    }
+    running=false;
+  }
+  return {
+    push(u){ q.push(u); pump(); },
+    clear(){ q.length=0; }
+  };
+}
+async function ttsUrl(text){
+  try{
+    const r=await apiFetch('/api/tts',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({text})});
+    const d=await r.json(); return d.audio||null;
+  }catch(e){ return null; }
+}
+
+async function listenLoop(){
+  if(!inCall) return;
+  cstat.textContent='说吧，我听着';
+  const buf=new Uint8Array(analyser.frequencyBinCount);
+  callRec=new MediaRecorder(callStream); callChunks=[];
+  callRec.ondataavailable=e=>{ if(e.data.size>0) callChunks.push(e.data); };
+  callRec.start();
+  let started=false, silentSince=0, bargeStart=0;
+
+  const tick=()=>{
+    if(!inCall) return;
+    analyser.getByteTimeDomainData(buf);
+    const r=rmsOf(buf);
+    if(playing && r>0.05){
+      if(!bargeStart) bargeStart=Date.now();
+      if(Date.now()-bargeStart>300){
+        try{ playing.pause(); }catch(e){}
+        playing=null; bargeStart=0; cstat.textContent='…你说';
+      }
+    } else if(r<=0.05){ bargeStart=0; }
+    if(!paused){
+      if(r>0.022){ started=true; silentSince=0; waveBars(true);
+        if(cstat.textContent==='说吧，我听着') cstat.textContent='…'; }
+      else if(started){
+        if(!silentSince) silentSince=Date.now();
+        if(Date.now()-silentSince>600){ finishTurn(); return; }
+      }
+    }
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+
+  async function finishTurn(){
+    paused=true; waveBars(false);
+    try{ callRec.stop(); }catch(e){}
+    await new Promise(r=>setTimeout(r,100));
+    const blob=new Blob(callChunks,{type:callRec.mimeType||'audio/webm'});
+    if(blob.size<2500){ paused=false; listenLoop(); return; }
+    cstat.textContent='…';
+    const rd=new FileReader();
+    rd.onload=async()=>{
+      const t0=Date.now();
+      try{
+        // 1) 先转文字
+        const r1=await apiFetch('/api/stt',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({audio:rd.result})});
+        const d1=await r1.json();
+        const heard=(d1.text||'').trim();
+        if(!heard){ cstat.textContent='没听清'; paused=false; listenLoop(); return; }
+        csaid.textContent='你说：'+heard;
+        textBubble('me',heard);
+        // 2) 流式生成，边出边合成边播
+        const player=makePlayer();
+        let buf2='', spoken='', reply='';
+        const resp=await apiFetch('/api/stream?call=1&text='+encodeURIComponent(heard));
+        const reader=resp.body.getReader(); const dec=new TextDecoder(); let acc='';
+        const flush=(final)=>{
+          // 把已经完整说完的句子切出来合成
+          const parts=spoken.split(/(?<=[。！？!?…~～\n])/);
+          let keep='';
+          if(!final){ keep=parts.pop()||''; } else { keep=''; }
+          const ready=parts.join('');
+          if(ready.trim()){ player.push(ttsUrl(ready.trim())); }
+          spoken=keep;
+          if(final && keep.trim()){ player.push(ttsUrl(keep.trim())); spoken=''; }
+        };
+        while(true){
+          const {done,value}=await reader.read(); if(done) break;
+          acc+=dec.decode(value,{stream:true});
+          let i;
+          while((i=acc.indexOf('\n\n'))>=0){
+            const chunk=acc.slice(0,i); acc=acc.slice(i+2);
+            if(!chunk.startsWith('data:'))continue;
+            const ev=JSON.parse(chunk.slice(5).trim());
+            if(ev.type==='delta'){ buf2+=ev.t; spoken+=ev.t;
+              csaid.textContent=(reply=clean(buf2))||'…';
+              // 攒到句子就立刻合成
+              if(/[。！？!?…~～\n]/.test(ev.t) ||
+                 (spoken.length>=3 && /[，,、；;：:]/.test(ev.t)) ||
+                 spoken.length>=14){ flush(false); }
+            } else if(ev.type==='done'){ reply=ev.reply||reply; flush(true);
+              csaid.textContent=reply; voiceBubble(reply,null); }
+          }
+        }
+        flush(true);
+        cstat.textContent=((Date.now()-t0)/1000).toFixed(1)+'s';
+      }catch(e){ cstat.textContent='断了一下'; }
+      paused=false;
+      if(inCall) setTimeout(listenLoop,120);
+    };
+    rd.readAsDataURL(blob);
+  }
+}
+
+document.body.addEventListener('click', ()=>{
+  if(window._pendingAudio){ const u=window._pendingAudio; window._pendingAudio=null;
+    try{ new Audio(u).play().catch(()=>{}); }catch(e){} }
+}, {passive:true});
+
+apiFetch('/api/auth').then(r=>r.json()).then(d=>{
+  if(d.auth_required && !d.ok) askToken('这个 App 设了访问口令');
+}).catch(()=>{});
+</script></body></html>
