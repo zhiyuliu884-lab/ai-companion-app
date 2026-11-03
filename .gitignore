@@ -22,3 +22,5 @@ __pycache__/
 Thumbs.db
 
 data/*.db
+
+env.ps1

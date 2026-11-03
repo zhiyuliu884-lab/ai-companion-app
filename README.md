@@ -72,8 +72,8 @@ pip install -r requirements.txt
 ### 2. 配置
 
 ```powershell
-copy config.example.json config.json
-notepad config.json
+copy env.example.ps1 env.ps1
+notepad env.ps1
 ```
 
 最少改这三个：
@@ -197,7 +197,7 @@ data/             运行数据（自动创建，已被 .gitignore）
 ## 安全
 
 1. **一定设 `access_token`**，否则拿到地址的人能看到聊天记录
-2. API Key 只放 `config.json`（已 gitignore）
+2. API Key 只放 `env.ps1`（已 gitignore）
 3. 别把签好的 APK 和 keystore 提交上来
 4. 出图/语音服务如果暴露公网，也要加口令
 
