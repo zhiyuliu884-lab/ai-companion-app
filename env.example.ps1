@@ -8,6 +8,11 @@ $env:AC_PROVIDER_BASE="https://api.deepseek.com/v1"
 $env:AC_PROVIDER_MODEL="deepseek-chat"
 $env:AC_PROVIDER_KEY="sk-你的密钥"
 
+# 可选：视觉（发图片 / 视频通话时她能看见你）
+# $env:AC_VISION_BASE="https://dashscope.aliyuncs.com/compatible-mode/v1"
+# $env:AC_VISION_MODEL="qwen-vl-max"
+# $env:AC_VISION_KEY="sk-你的视觉密钥"
+
 # 可选：接你自己的服务
 $env:AC_TTS="http://127.0.0.1:6194/tts"
 $env:AC_IMG="http://127.0.0.1:6196/generate"

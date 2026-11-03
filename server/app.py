@@ -445,17 +445,27 @@ def push_unread(item: dict) -> None:
 _LAST_DECIDE_RAW = ""
 VISION = {"img": "", "ts": 0.0}
 VISION_DESC = {"text": "", "ts": 0.0}
-VISION_FILE = r"C:\rvc\vision.json"
+VISION_FILE = os.environ.get("AC_VISION_FILE", os.path.join(BASE, "data", "vision.json"))
 VISION_CFG = {"base": "", "model": "", "key": ""}
 
 
 def _load_vision():
+    # 环境变量优先，其次 vision.json
+    VISION_CFG.update({
+        "base": os.environ.get("AC_VISION_BASE", ""),
+        "model": os.environ.get("AC_VISION_MODEL", ""),
+        "key": os.environ.get("AC_VISION_KEY", ""),
+    })
     try:
         d = json.load(open(VISION_FILE, encoding="utf-8-sig"))
-        VISION_CFG.update({k: (d.get(k) or "") for k in ("base", "model", "key")})
-        if VISION_CFG["key"]:
-            print(f"[chat] 视觉模型已配置：{VISION_CFG['model']}", flush=True)
+        for k in ("base", "model", "key"):
+            if not VISION_CFG.get(k):
+                VISION_CFG[k] = d.get(k) or ""
     except Exception:
+        pass
+    if VISION_CFG["key"]:
+        print(f"[chat] 视觉模型已配置：{VISION_CFG['model']}", flush=True)
+    else:
         print("[chat] 未配置视觉模型（发图片/视频通话时她看不见）", flush=True)
 
 
