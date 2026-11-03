@@ -24,6 +24,8 @@
 | 功能 | 需要什么 | 说明 |
 |---|---|---|
 | **打电话** | 你的 TTS 服务 | 全屏通话、可打断、安静 12 秒她会主动说话 |
+| **视频通话（她能看到你）** | 多模态模型 | 通话里开摄像头，她能看见你并聊到画面内容 |
+| **情绪语音** | 你的 TTS 服务 | 开心/不高兴/撒娇/害羞/难过，语气跟着内容变 |
 |---|---|---|
 | 文字聊天（流式） | 只要 LLM | 回复逐字出现 |
 | **自定义外观** | 无 | App 内直接上传头像 / 背景 / 改名字 |
@@ -35,6 +37,23 @@
 | 记忆面板 | 无 | 时间轴 / 搜索 / 记一条 / 忘掉 / 周总结 |
 | 推送通知 | Android App | 她主动找你时弹通知 |
 | 访问口令 | 无 | 防止公网地址被陌生人用 |
+
+---
+
+## 换成你自己的立绘
+
+App 里那个会呼吸、会说话的角色，用的是 `assets/placeholder.png`（灰色占位图）。
+
+**换成你自己的**：
+
+1. 画一张立绘，导出 **720 × 989 的 PNG，背景透明**
+2. 覆盖 `assets/placeholder.png`，或者设环境变量 `AC_APPEARANCE` 指向你的图
+3. 重启后端，App 里就是你了
+
+> 想换表情/五官分层（眨眼、口型）也可以：把 `static/avatar/blank.png` 换成你自己的
+> 眼皮/嘴部贴图，并在 `page.html` 里改 `AV` 那一行的坐标。
+
+> 不想要角色形象？把 `assets/placeholder.png` 换成任意一张图，或者直接用默认灰色剪影。
 
 ---
 
@@ -189,3 +208,36 @@ data/             运行数据（自动创建，已被 .gitignore）
 MIT，见 [LICENSE](LICENSE)。
 
 角色设定、形象、声音的版权归你自己，请勿用于冒充真人。
+
+---
+
+## 配置（环境变量）
+
+后端读环境变量，不依赖任何配置文件：
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `AC_PORT` | 6191 | 监听端口 |
+| `AC_NAME` | 她 | 角色名字（显示在标题/通知） |
+| `AC_PERSONA` | 内置示例 | 人格提示词（也可以用你自己的 AstrBot 数据库） |
+| `AC_PROVIDER_BASE` | api.deepseek.com/v1 | LLM 接口地址 |
+| `AC_PROVIDER_KEY` | 空 | LLM 密钥 |
+| `AC_PROVIDER_MODEL` | deepseek-chat | 模型名 |
+| `AC_TOKEN_FILE` | data/app_token.txt | 访问口令存放位置（没有就自动生成） |
+| `AC_ASSETS` | static | 静态文件目录（`page.html` 在这里） |
+| `AC_APPEARANCE` | data/appearance.png | 你上传/指定的立绘 |
+| `AC_HISTORY` | data/chat_history.db | 聊天记录 |
+| `AC_INSTANCE` | C:\AstrBot\data | 有 AstrBot 时指向它的 data 目录 |
+| `AC_QQ_USER` | 0 | 你的 QQ 号（QQ 提醒用，可选） |
+| `AC_TTS` | http://127.0.0.1:6194/tts | 你的 TTS 服务 |
+| `AC_IMG` | http://127.0.0.1:6196/generate | 你的出图服务 |
+
+PowerShell 里这样起：
+
+```powershell
+$env:AC_NAME="小七"
+$env:AC_PROVIDER_KEY="sk-你的密钥"
+$env:AC_PROVIDER_MODEL="deepseek-chat"
+python server/app.py
+```
+

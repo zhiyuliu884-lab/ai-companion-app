@@ -4,7 +4,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0b1020">
-<title>AI</title>
+<title>她</title>
 <link rel="manifest" href="/manifest.json">
 <link rel="apple-touch-icon" href="/static/icon-180.png">
 <link rel="icon" href="/static/icon-192.png">
@@ -117,13 +117,32 @@ header button{font-size:13px;color:#9fb4e0;padding:4px 8px}
 #setp .ph b{flex:1;font-size:16px}
 #setp .body{flex:1;overflow-y:auto;padding:10px 14px 30px}
 #setp .btn{background:#2f6bff;color:#fff;border:none;border-radius:10px;padding:10px 14px;font-size:14px}
+
+  #call .cav{display:none}
+  #avBox{position:relative;flex:0 0 auto;margin:2px 0 4px;
+    height:52vh;width:calc(52vh * 720 / 989);max-width:92vw;
+    max-height:calc(92vw * 989 / 720)}
+  #avBox canvas,#avBox img{position:absolute;left:0;top:0;width:100%;height:100%;object-fit:contain;
+    pointer-events:none;user-select:none;-webkit-user-drag:none}
+  #avEyes{opacity:0;transition:opacity .07s linear}
+  #avEyes.on{opacity:1}
+  #avMouthC,#avMouthO,#avHappyEyes,#avTears{opacity:0}
+  #camPreview{position:absolute;right:12px;top:56px;width:96px;height:128px;object-fit:cover;
+    border-radius:12px;background:#0b1020;border:1px solid rgba(120,160,255,.35);display:none;
+    transform:scaleX(-1);z-index:5}
+  #camPreview.on{display:block}
+  .bub .playTag{margin-top:6px;font-size:12px;color:#8fb0ff;opacity:.85;cursor:pointer}
+  #camBtn{background:#1b2a4d;color:#cfe0ff;border:1px solid #2f4a80;
+    border-radius:30px;padding:13px 26px;font-size:15px;margin-right:10px;font-family:inherit}
+  #camBtn:active{background:#264070}
 </style></head>
 <body>
 <div id="bgwrap"></div><div id="veil"></div>
 <div id="app">
-  <header><span class="dot"></span><span id="brandName">AI</span><span class="sp"></span>
+  <header><span class="dot"></span>她<span class="sp"></span>
     <button id="callBtn">📞</button><button id="setBtn">⚙</button><button id="memBtn">记忆</button><button id="clearBtn">清屏</button></header>
   <div id="log"></div>
+<audio id="gAudio" preload="auto"></audio>
   <div id="bar">
     <button id="img">🖼</button>
     <button id="mic">🎤</button>
@@ -152,24 +171,11 @@ header button{font-size:13px;color:#9fb4e0;padding:4px 8px}
       <button class="btn" id="battBtn" style="width:100%;background:#2f8f5b;margin-bottom:8px">关闭电池优化（保活）</button>
       <button class="btn" id="exactBtn" style="width:100%;background:#8a5cf6">允许精确闹钟（更快收到）</button>
     </div>
+    <div class="card"><div class="t">运行状态</div>
+      <div class="c" id="avVerTxt" style="font-size:13px;color:#9fb4e0">页面版本：加载中…</div>
+    </div>
     <div class="card"><div class="t">后台服务</div>
       <div class="c" id="svcStateTxt" style="font-size:13px;color:#9fb4e0">检查中…</div>
-    </div>
-    <div class="card"><div class="t">她的名字</div>
-      <input id="setName" placeholder="比如：小鲸鱼"
-             style="width:100%;background:#0e1830;border:1px solid #223255;border-radius:10px;
-                    padding:10px;color:#e8eefc;font-size:14px;margin-bottom:8px;font-family:inherit">
-      <button class="btn" id="saveName" style="width:100%;margin-bottom:8px">保存名字</button>
-    </div>
-    <div class="card"><div class="t">她的头像</div>
-      <div style="font-size:12px;color:#7d8db3;margin-bottom:8px">方图最好，自动裁圆</div>
-      <input type="file" id="pickAvatar" accept="image/*" style="font-size:13px;color:#9fb4e0">
-      <div id="avPrev" style="margin-top:8px"></div>
-    </div>
-    <div class="card"><div class="t">聊天背景</div>
-      <div style="font-size:12px;color:#7d8db3;margin-bottom:8px">竖图最好，完整显示</div>
-      <input type="file" id="pickWall" accept="image/*" style="font-size:13px;color:#9fb4e0">
-      <div id="wpPrev" style="margin-top:8px"></div>
     </div>
     <div class="card"><div class="t">关于</div>
       <div class="c" style="font-size:13px;color:#9fb4e0;line-height:1.7">
@@ -190,7 +196,7 @@ header button{font-size:13px;color:#9fb4e0;padding:4px 8px}
 <div id="ring">
   <img class="rav" src="/static/icon-512.png">
   <div class="rt">来电</div>
-  <div class="rn" id="ringName">AI</div>
+  <div class="rn" id="ringName">她</div>
   <div class="rs" id="ringLine">……</div>
   <div class="rbtns">
     <button id="rejectCall" class="rno">挂断</button>
@@ -199,12 +205,22 @@ header button{font-size:13px;color:#9fb4e0;padding:4px 8px}
 </div>
 <div id="call">
   <img class="cav" src="/static/icon-512.png">
-  <div class="cname" id="callName">AI</div>
+  <div class="cname">她</div>
+  <div id="avBox">
+    <canvas id="avCanvas" width="720" height="989"></canvas>
+    <img id="avEyes" src="/static/avatar/blank.png" alt="">
+    <img id="avMouthC" src="/static/avatar/blank.png" alt="">
+    <img id="avHappyEyes" src="/static/avatar/blank.png" alt="">
+    <img id="avTears" src="/static/avatar/blank.png" alt="">
+    <img id="avMouthO" src="/static/avatar/blank.png" alt="">
+  </div>
   <div class="cstat" id="cstat">未连接</div>
   <div class="cwave" id="cwave"></div>
   <div class="csaid" id="csaid"></div>
+  <video id="camPreview" playsinline muted></video>
   <div class="cbtns">
-    <button id="hangup">挂断</button>
+    <button id="camBtn">开摄像头</button>
+  <button id="hangup">挂断</button>
   </div>
 </div>
 <input type="file" id="file" accept="image/*" style="display:none">
@@ -234,7 +250,7 @@ async function apiFetch(url,opt){
   return r;
 }
 
-let AV_HER='/static/icon-192.png';
+const AV_HER='/static/icon-192.png';
 const log=document.getElementById('log'),box=document.getElementById('box'),
       sendBtn=document.getElementById('send'),mic=document.getElementById('mic'),
       file=document.getElementById('file'),tip=document.getElementById('tip');
@@ -257,10 +273,13 @@ function waveHtml(n){let h='<div class="wave">';for(let i=0;i<(n||5);i++){
   const hh=4+Math.round(Math.random()*10);h+=`<i style="height:${hh}px"></i>`;}return h+'</div>';}
 function voiceBubble(text,audio,durSec){
   const b=mkRow('her');
+  b.classList.add('showtxt');           // 文字直接显示，不再需要长按
   const v=document.createElement('div');v.className='voice';
   v.innerHTML='<div class="tri"></div>'+waveHtml(6)+`<span class="dur">${durSec||Math.max(1,Math.round(text.length/4))}"</span>`;
   b.appendChild(v);
-  const hidden=document.createElement('div');hidden.className='txt';hidden.textContent=text;b.appendChild(hidden);
+  const hidden=document.createElement('div');hidden.className='txt';
+  hidden.style.cssText='display:block;margin-top:6px;font-size:14px;line-height:1.5;color:#dcE8ff';
+  hidden.textContent=text;b.appendChild(hidden);
   const a=document.createElement('audio');a.src=audio;a.preload='auto';b.appendChild(a);
   v.onclick=()=>{a.play().catch(()=>{});v.classList.add('playing');
     setTimeout(()=>v.classList.remove('playing'),Math.max(1500,(durSec||4)*1000));};
@@ -295,34 +314,73 @@ function clean(t){
     .replace(/(用户未成年|露骨色情)[\s\S]*?(safety|规则|$)/gi,'')
     .replace(/【[^】]{0,6}】/g,'');
 }
+let activePlayer = null, callSpeaking = false;
+function playUrl(url, metaText){
+  const a = document.getElementById('gAudio');
+  if(!a) return null;
+  try{ a.pause(); }catch(e){}
+  a.src = url; a.currentTime = 0;
+  if(metaText !== undefined) avSpeak(a, metaText || '');
+  a.play().catch(function(){});
+  return a;
+}
+function stopAudio(){
+  const a = document.getElementById('gAudio');
+  if(!a) return;
+  try{ a.pause(); a.removeAttribute('src'); a.load(); }catch(e){}
+  try{ avShut(); }catch(e){}
+}
+
 function makePlayer(){
-  const q=[]; let running=false;
+  const q=[]; let running=false, cur=null, stopped=false;
   async function pump(){
     if(running) return; running=true;
     while(q.length){
+      if(stopped) break;
       const item=q.shift();
-      let url=item;
-      if(item && typeof item.then==='function'){ try{ url=await item; }catch(e){ url=null; } }
+      const meta = (item && item.u) ? item : {u:item, t:''};
+      let url=meta.u;
+      if(url && typeof url.then==='function'){ try{ url=await url; }catch(e){ url=null; } }
       if(!url) continue;
-      playing = null;
+      playing = null; callSpeaking = true;
+      if(stopped){ callSpeaking = false; break; }
       await new Promise(res=>{
-        const a=new Audio(url); window._lastAudio=a;
-        a.onended=res; a.onerror=res;
+        const a = playUrl(url, meta.t); window._lastAudio=a; cur=a;
+        if(!a){ res(); return; }
+        avSpeak(a, meta.t);
+        a.onended=function(){ avShut(); if(cur===a) cur=null; res(); };
+        a.onerror=function(){ avShut(); if(cur===a) cur=null; res(); };
         const pr=a.play();
-        if(pr&&pr.catch){ pr.catch(()=>{ res(); }); }
+        if(pr&&pr.catch){ pr.catch(()=>{ avShut(); res(); }); }
       });
     }
-    running=false;
+    running=false; callSpeaking=false;
   }
-  return { push(u){ q.push(u); pump(); }, clear(){ q.length=0; } };
+  return {
+    push(u){ if(stopped) return; q.push(u); pump(); },
+    clear(){ q.length=0; },
+    stop(){
+      stopped = true; q.length = 0; callSpeaking = false;
+      try{ if(cur){ cur.pause(); cur.src=''; } }catch(e){}
+      cur = null; try{ avShut(); }catch(e){}
+    }
+  };
 }
 
+let sendingNow = false;
 async function sayText(text){
   if(!text.trim())return;
+  if(sendingNow) return;
+  sendingNow = true;
   textBubble('me',text);box.value='';box.style.height='auto';sendBtn.disabled=true;
+  try{ if(activePlayer){ activePlayer.stop(); activePlayer=null; } }catch(e){}
+  try{ stopAudio(); }catch(e){}
   const b=mkRow('her');b.textContent='';
   let raw='', spoken='', player=null, audioDone=false;
-  const ensurePlayer=()=>{ if(!player) player=makePlayer(); return player; };
+  const ensurePlayer=()=>{
+    if(!player){ player=makePlayer(); activePlayer=player; }
+    return player;
+  };
   let firstChunk = true;
   const flushPart=(final)=>{
     let ready = '';
@@ -356,17 +414,33 @@ async function sayText(text){
       while((i=buf.indexOf('\n\n'))>=0){
         const chunk=buf.slice(0,i);buf=buf.slice(i+2);
         if(!chunk.startsWith('data:'))continue;
-        const ev=JSON.parse(chunk.slice(5).trim());
+        let ev; try{ ev=JSON.parse(chunk.slice(5).trim()); }catch(e){ continue; }
+        if(ev.type==='ping') continue;
         if(ev.type==='delta'){
           raw+=ev.t; spoken+=ev.t;
           b.textContent=clean(raw);scroll();
           // 一出句号/逗号就先合成，抢时间
           if(/[。！？!?…~～\n]/.test(ev.t) || (spoken.length>=6 && /[，,、；;：:]/.test(ev.t))) flushPart(false);
         } else if(ev.type==='done'){
-          b.remove();
-          if(ev.audio){ voiceBubble(ev.reply, ev.audio); }
-          else if(ev.reply){
-            const parts = splitKeepPunct(spoken, SENT_PUNCT);
+          // 文字永远是主角：气泡保留，不再删掉换成语音条
+          const replyText = (ev.reply || clean(raw) || '').trim();
+          if(replyText) b.textContent = replyText;
+          else if(!(ev.images||[]).length) b.textContent = '……';
+
+          // 有现成音频：就地在气泡里放一个小播放器，自动播
+          if(ev.audio){
+            try{
+              if(player){ player.stop(); player=null; }
+              if(activePlayer){ activePlayer.stop(); activePlayer=null; }
+            }catch(e){}
+            playUrl(ev.audio, replyText);
+            const tag=document.createElement('div');
+            tag.className='playTag'; tag.textContent='🔊 点这里重听';
+            tag.onclick=function(){ playUrl(ev.audio, replyText); };
+            b.appendChild(tag);
+          } else if(replyText){
+            // 没有现成音频：边合成边播，文字照旧留着
+            const parts = splitKeepPunct(spoken || replyText, SENT_PUNCT);
             const rest = (parts.pop()||'').trim();
             const ready = parts.join('').trim();
             spoken = '';
@@ -378,8 +452,28 @@ async function sayText(text){
         } else if(ev.type==='error'){ b.textContent='连不上她……'; }
       }
     }
-  }catch(e){ b.textContent='连不上她……'; }
-  sendBtn.disabled=false;scroll();
+  }catch(e){
+    // 流式断了：先试一次普通请求兜底，别直接报"连不上"
+    if(!(raw||'').trim()){
+      try{
+        const r2 = await apiFetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({text:text})});
+        const d2 = await r2.json();
+        if(d2 && d2.reply){
+          b.textContent = d2.reply;
+          if(d2.audio){ playUrl(d2.audio, d2.reply);
+            const tag=document.createElement('div'); tag.className='playTag';
+            tag.textContent='🔊 点这里重听';
+            tag.onclick=function(){ playUrl(d2.audio, d2.reply); };
+            b.appendChild(tag);
+          }
+        } else { b.textContent='连不上她，再试一次？'; }
+      }catch(e2){ b.textContent='连不上她，再试一次？'; }
+    } else {
+      b.textContent = clean(raw) + '（断了一下）';
+    }
+  }
+  sendingNow = false; sendBtn.disabled=false;scroll();
 }
 sendBtn.onclick=()=>sayText(box.value);
 box.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sayText(box.value);}});
@@ -462,7 +556,7 @@ setInterval(async()=>{
   try{const d=await (await apiFetch('/api/pending?ack=1')).json();
     (d.items||[]).forEach(it=>{
       if('Notification' in window && Notification.permission==='granted')
-        new Notification(BRAND.name||'AI',{body:it.text,icon:AV_HER});
+        new Notification('她',{body:it.text,icon:AV_HER});
     });}catch(e){}
 },30000);
 
@@ -478,10 +572,13 @@ function splitSentences(t){
   if(cur) out.push(cur);
   return out.length ? out : (t? [t] : []);
 }
-async function ttsUrl(text, fast){
+async function ttsUrl(text, fast, emo){
   try{
+    const body = { text };
+    if(fast) body.fast = true;
+    if(emo) body.emotion = emo;
     const r = await apiFetch('/api/tts',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify(fast?{text,fast:true}:{text})});
+      body:JSON.stringify(body)});
     const d = await r.json(); return d.audio||null;
   }catch(e){ return null; }
 }
@@ -506,6 +603,7 @@ async function speakProgressive(text){
 
 
 // ---------------- 打电话 ----------------
+let callLoopId=0, finishing=false, callEmo='';
 let inCall=false, callStream=null, audioCtx=null, analyser=null,
     callRec=null, callChunks=[], paused=false, playing=null;
 const callEl=document.getElementById('call'),
@@ -525,8 +623,10 @@ function rmsOf(buf){
   return Math.sqrt(sum/buf.length);
 }
 async function startCall(){
-  inCall=true; paused=false;
-  callEl.classList.add('on'); csaid.textContent='';
+  if(inCall) return;
+  inCall=true; paused=false; finishing=false; callLoopId++;
+  callEl.classList.add('on');
+  setTimeout(function(){ try{ avLayout(); avLevel=0; avRender(); }catch(e){} }, 60); csaid.textContent='';
   cstat.textContent='连接中…';
   try{
     callStream=await navigator.mediaDevices.getUserMedia(
@@ -540,16 +640,21 @@ async function startCall(){
   }catch(e){ cstat.textContent='拿不到麦克风'; }
 }
 function stopCall(){
-  inCall=false; callEl.classList.remove('on');
+  inCall=false; callLoopId++; finishing=false; callEl.classList.remove('on');
   try{ apiFetch('/api/pending?ack=1'); }catch(e){}
+  try{ if(activePlayer){ activePlayer.stop(); activePlayer=null; } }catch(e){}
   try{ if(playing){ playing.pause(); playing=null; } }catch(e){}
   try{ if(callRec && callRec.state==='recording') callRec.stop(); }catch(e){}
   try{ if(callStream) callStream.getTracks().forEach(function(t){t.stop();}); }catch(e){}
   try{ if(audioCtx) audioCtx.close(); }catch(e){}
   waveBars(false); csaid.textContent='';
+  try{ avShut(); setAvExpr('normal'); }catch(e){}
+  try{ if(camStream){ camStream.getTracks().forEach(function(t){t.stop();}); camStream=null; camOn=false; camEl.classList.remove('on'); } }catch(e){}
+  try{ camBtn.textContent='开摄像头'; }catch(e){}
 }
 document.getElementById('callBtn').onclick=function(){ startCall(); };
 document.getElementById('hangup').onclick=function(){ stopCall(); };
+document.getElementById('camBtn').onclick=function(){ toggleCamera(); };
 
 async function idleTalk(){
   try{
@@ -560,18 +665,239 @@ async function idleTalk(){
     csaid.textContent = d.reply;
     textBubble('her', d.reply);
     if(d.audio){
-      await new Promise(function(res){
-        var a=new Audio(d.audio);
-        a.onended=res; a.onerror=res;
-        a.play().catch(function(){ res(); });
-      });
+      if(activePlayer){ try{ activePlayer.stop(); }catch(e){} }
+      const pl = makePlayer(); activePlayer = pl;
+      pl.push({u:d.audio, t:d.reply});
     }
     cstat.textContent='说吧，我听着';
   }catch(e){}
 }
 
+// ---------- 会动的她 ----------
+const AV_VER = 'companion-v1';
+const AV = {W:720, H:989, MX:334, MY:569, CW:76, CH:48, OW:83, OH:66};
+const avBox=document.getElementById('avBox'),
+      avEyes=document.getElementById('avEyes'),
+      avMC=document.getElementById('avMouthC'),
+      avMO=document.getElementById('avMouthO');
+let avLevel=0, avS=1, avAttached=new WeakSet();
+
+function avLayout(){
+  if(!avBox) return;
+  const scale = avBox.clientWidth / AV.W || 0.2;
+  avS = scale;
+  const put=(el,cx,cy,w,h)=>{
+    if(!el) return;
+    el.style.width=(w*scale)+'px'; el.style.height=(h*scale)+'px';
+    el.style.left=(cx*scale - w*scale/2)+'px';
+    el.style.top =(cy*scale - h*scale/2)+'px';
+  };
+  put(avMC, AV.MX, AV.MY, AV.CW, AV.CH);
+  put(avMO, AV.MX, AV.MY, AV.OW, AV.OH);
+}
+
+function avRender(){
+  if(!avMC) return;
+  const v = Math.max(0, Math.min(1, avLevel));
+  const open = v > 0.08;
+  avMO.style.opacity = open ? 1 : 0;
+  avMC.style.opacity = open ? 0 : 1;
+  const w = AV.OW*avS*(0.86+v*0.14);
+  const h = AV.OH*avS*(0.55+v*0.60);
+  avMO.style.width=w+'px'; avMO.style.height=h+'px';
+  avMO.style.left=(AV.MX*avS - w/2)+'px';
+  avMO.style.top =(AV.MY*avS - h/2)+'px';
+}
+
+let AV_BLINK = false;   // 没有可靠的闭眼素材前，先不眨
+function avBlink(){
+  if(!AV_BLINK || !avEyes) return;
+  avEyes.classList.add('on');
+  setTimeout(()=>avEyes.classList.remove('on'), 90);
+}
+setInterval(()=>{ if(inCall && Math.random()<0.75) avBlink(); }, 2200);
+
+// ---------- 动作引擎：呼吸 / 摇摆 / 歪头 / 点头 / 说话抖动 / 听你说话时前倾 ----------
+let avT0 = performance.now();
+let avTalking = false, avListening = false;
+let avMicro = {type:'', until:0, next: performance.now() + 4000};
+let avPupil = {x:0, y:0, tx:0, ty:0};
+let avPupilL = null, avPupilR = null;   // 眼珠层（后续再启用）
+
+function pickMicro(now){
+  const types = ['tilt','nod','shrug','look'];
+  avMicro.type = types[Math.floor(Math.random()*types.length)];
+  avMicro.until = now + 900 + Math.random()*700;
+  avMicro.next = now + 4200 + Math.random()*5200;
+}
+
+(function avMotion(now){
+  if(avBox){
+    const t = (now - avT0) / 1000;
+    // 基础：呼吸
+    let y = Math.sin(t*1.05) * 4;
+    let x = Math.sin(t*0.43) * 3.5;          // 很慢的左右摇摆
+    let rot = Math.sin(t*0.37 + 1.1) * 0.8;  // 极轻微的倾
+    let sc = 1 + Math.sin(t*1.05 + 1.3) * 0.004;
+
+    // 小动作
+    if(now > avMicro.next) pickMicro(now);
+    if(now < avMicro.until){
+      const k = Math.sin((avMicro.until - now)/1000 * 6) * Math.min(1,(avMicro.until-now)/300);
+      if(avMicro.type==='tilt')  rot += k*2.2;
+      if(avMicro.type==='nod')   y   += Math.abs(k)*5;
+      if(avMicro.type==='shrug') sc  += Math.abs(k)*0.008;
+      if(avMicro.type==='look')  avPupil.tx = k*3, avPupil.ty = k*2;
+    } else {
+      avPupil.tx *= 0.92; avPupil.ty *= 0.92;
+    }
+
+    // 说话时：跟着嘴型轻微点头 + 上下颠
+    if(avTalking){
+      y += (avLevel-0.5) * 3 + Math.sin(t*7.5) * 1.2;
+      rot += Math.sin(t*3.1) * 0.6;
+    }
+    // 听你说话：微微前倾（放大 1.5%）
+    if(avListening) sc += 0.015;
+
+    avBox.style.transform =
+      'translate(' + x.toFixed(2) + 'px,' + y.toFixed(2) + 'px) rotate(' + rot.toFixed(2) +
+      'deg) scale(' + sc.toFixed(4) + ')';
+
+    try{ avWarp(now); }catch(e){}
+    // 眼珠微动
+    avPupil.x += (avPupil.tx - avPupil.x) * 0.15;
+    avPupil.y += (avPupil.ty - avPupil.y) * 0.15;
+    if(avPupilL) avPupilL.style.transform = 'translate(' + avPupil.x.toFixed(1) + 'px,' + avPupil.y.toFixed(1) + 'px)';
+    if(avPupilR) avPupilR.style.transform = 'translate(' + avPupil.x.toFixed(1) + 'px,' + avPupil.y.toFixed(1) + 'px)';
+  }
+  requestAnimationFrame(avMotion);
+})(performance.now());
+
+// 用她的声音驱动嘴
+let avCtx=null, avAnalyser=null, avBuf=null, avRaf=0;
+function avAttach(a){
+  try{
+    if(!a || avAttached.has(a)) { return; }
+    avAttached.add(a);
+    avCtx = avCtx || new (window.AudioContext||window.webkitAudioContext)();
+    const src = avCtx.createMediaElementSource(a);
+    avAnalyser = avCtx.createAnalyser();
+    avAnalyser.fftSize = 512;
+    avBuf = new Uint8Array(avAnalyser.frequencyBinCount);
+    src.connect(avAnalyser);
+    avAnalyser.connect(avCtx.destination);
+    cancelAnimationFrame(avRaf);
+    (function tick(){
+      avAnalyser.getByteTimeDomainData(avBuf);
+      let sum=0;
+      for(let i=0;i<avBuf.length;i++){ const d=(avBuf[i]-128)/128; sum+=d*d; }
+      const rms=Math.sqrt(sum/avBuf.length);
+      avLevel = Math.min(1, Math.pow(rms*5.5, 0.7));
+      avRender();
+      if(a.paused || a.ended){ avLevel=0; avRender(); return; }
+      avRaf = requestAnimationFrame(tick);
+    })();
+  }catch(e){}
+}
+
+let avSpeakTimer=0;
+function avShut(){
+  clearInterval(avSpeakTimer); avSpeakTimer=0;
+  avLevel=0; avTalking=false; avRender();
+}
+function avSpeak(a, text){
+  avShut();
+  avTalking = true;
+  const chars = (text||'').replace(/[\s，。！？、,.!?…~～]/g,'');
+  let i = 0;
+  avSpeakTimer = setInterval(function(){
+    if(a && (a.paused || a.ended)){ avShut(); return; }
+    if(chars.length){
+      i = (i+1) % chars.length;
+      avLevel = 0.30 + Math.random()*0.62;
+    } else {
+      avLevel = 0.35 + Math.random()*0.5;
+    }
+    avRender();
+  }, 105);
+}
+
+let avExprTimer = 0;
+function setAvExpr(e){
+  const happy = document.getElementById('avHappyEyes');
+  const tears = document.getElementById('avTears');
+  if(!happy || !tears) return;
+  happy.style.opacity = (e === 'happy') ? 1 : 0;
+  tears.style.opacity = (e === 'cry') ? 1 : 0;
+  if(e !== 'normal'){
+    clearTimeout(avExprTimer);
+    avExprTimer = setTimeout(function(){ happy.style.opacity = 0; tears.style.opacity = 0; }, 6000);
+  }
+}
+
+let camStream=null, camOn=false;
+const camEl=document.getElementById('camPreview'),
+      camBtn=document.getElementById('camBtn');
+
+async function toggleCamera(){
+  if(camOn){
+    try{ camStream.getTracks().forEach(t=>t.stop()); }catch(e){}
+    camStream=null; camOn=false; camEl.classList.remove('on');
+    if(camBtn) camBtn.textContent='开摄像头';
+    return;
+  }
+  try{
+    camStream = await navigator.mediaDevices.getUserMedia({video:{width:640,height:480,facingMode:'user'}, audio:false});
+    camOn=true;
+    if(camEl){ camEl.srcObject=camStream; camEl.classList.add('on'); camEl.play().catch(()=>{}); }
+    if(camBtn) camBtn.textContent='关摄像头';
+  }catch(e){ showTip('拿不到摄像头'); }
+}
+
+// 抓一帧，缩到 512 宽，送后端让她"看见"
+async function pushFrame(){
+  if(!camOn || !camEl || !camEl.videoWidth) return;
+  try{
+    const w=512, h=Math.round(camEl.videoHeight*w/camEl.videoWidth);
+    const cv=document.createElement('canvas'); cv.width=w; cv.height=h;
+    cv.getContext('2d').drawImage(camEl,0,0,w,h);
+    const data=cv.toDataURL('image/jpeg',0.62);
+    await apiFetch('/api/vision_note',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({image:data})});
+  }catch(e){}
+}
+
+// ---------- 头发/裙摆飘动：canvas 竖条波浪 ----------
+const avCanvas = document.getElementById('avCanvas');
+let avImg = new Image();
+avImg.src = '/api/appearance?t=' + Date.now();
+let avReady = false;
+avImg.onload = function(){ avReady = true; };
+
+function avWarp(now){
+  if(!avReady || !avCanvas) return;
+  const ctx = avCanvas.getContext('2d');
+  const W = avCanvas.width, H = avCanvas.height;
+  const t = now / 1000;
+  const STRIPS = 22;
+  const sw = W / STRIPS;
+  ctx.clearRect(0, 0, W, H);
+  for (let i = 0; i < STRIPS; i++){
+    const x = i * sw;
+    // 权重：中间不动，越靠边越飘
+    const cx = Math.abs((x + sw/2) / W - 0.5) * 2;      // 0 中心 → 1 边缘
+    const w = Math.pow(cx, 2.2);
+    // 越往下飘得越明显（头发/裙子在下面）
+    const dx = Math.sin(t * 1.6 + i * 0.55) * 5.2 * w;
+    const dy = Math.cos(t * 1.1 + i * 0.4) * 1.4 * w;
+    ctx.drawImage(avImg, x, 0, sw, H, x + dx, dy, sw + 0.6, H);
+  }
+}
+
 async function listenLoop(){
   if(!inCall) return;
+  const myId = ++callLoopId;
   cstat.textContent='说吧，我听着';
   const buf=new Uint8Array(analyser.frequencyBinCount);
   callRec=new MediaRecorder(callStream); callChunks=[];
@@ -581,25 +907,27 @@ async function listenLoop(){
 
   let lastVoice = Date.now(), idleFired = 0;
   const tick=()=>{
-    if(!inCall) return;
+    if(!inCall || myId !== callLoopId) return;
     analyser.getByteTimeDomainData(buf);
     const r=rmsOf(buf);
     if(playing && r>0.05){
       if(!bargeStart) bargeStart=Date.now();
       if(Date.now()-bargeStart>300){
         try{ playing.pause(); }catch(e){}
+        try{ if(activePlayer) activePlayer.stop(); }catch(e){}
         playing=null; bargeStart=0; cstat.textContent='…你说';
       }
     } else if(r<=0.05){ bargeStart=0; }
     if(!paused){
       if(r>0.022){ started=true; silentSince=0; lastVoice=Date.now(); idleFired=0; waveBars(true);
+        avListening = !avTalking;
         if(cstat.textContent==='说吧，我听着') cstat.textContent='…'; }
       else if(started){
         if(!silentSince) silentSince=Date.now();
-        if(Date.now()-silentSince>450){ finishTurn(); return; }
+        if(Date.now()-silentSince>450){ avListening=false; finishTurn(); return; }
       }
       // 安静 12 秒她主动说一句（整通电话最多 3 次）
-      if(!paused && !playing && Date.now()-lastVoice > 12000 && idleFired < 3){
+      if(!paused && !callSpeaking && !playing && Date.now()-lastVoice > 12000 && idleFired < 3){
         idleFired++; lastVoice = Date.now();
         idleTalk();
       }
@@ -609,11 +937,14 @@ async function listenLoop(){
   requestAnimationFrame(tick);
 
   async function finishTurn(){
+    if(myId !== callLoopId) return;
+    if(finishing) return;
+    finishing = true;
     paused=true; waveBars(false);
     try{ callRec.stop(); }catch(e){}
     await new Promise(r=>setTimeout(r,100));
     const blob=new Blob(callChunks,{type:callRec.mimeType||'audio/webm'});
-    if(blob.size<2500){ paused=false; listenLoop(); return; }
+    if(blob.size<2500){ finishing=false; paused=false; listenLoop(); return; }
     cstat.textContent='…';
     const rd=new FileReader();
     rd.onload=async()=>{
@@ -624,11 +955,18 @@ async function listenLoop(){
           body:JSON.stringify({audio:rd.result})});
         const d1=await r1.json();
         const heard=(d1.text||'').trim();
-        if(!heard){ cstat.textContent='没听清'; paused=false; listenLoop(); return; }
+        if(!heard){ cstat.textContent='没听清'; finishing=false; paused=false; listenLoop(); return; }
+        try{ await pushFrame(); }catch(e){}
+        try{
+          const er = await apiFetch('/api/emotion?text='+encodeURIComponent(heard));
+          const ed = await er.json();
+          if(ed && ed.emotion) callEmo = ed.emotion;
+        }catch(e){}
         csaid.textContent='你说：'+heard;
         textBubble('me',heard);
         // 2) 流式生成，边出边合成边播
-        const player=makePlayer();
+        if(activePlayer){ try{ activePlayer.stop(); }catch(e){} }
+        const player=makePlayer(); activePlayer=player;
         let buf2='', spoken='', reply='';
         const resp=await apiFetch('/api/stream?call=1&text='+encodeURIComponent(heard));
         const reader=resp.body.getReader(); const dec=new TextDecoder(); let acc='';
@@ -639,9 +977,9 @@ async function listenLoop(){
           let keep='';
           if(!final){ keep=parts.pop()||''; } else { keep=''; }
           const ready=parts.join('');
-          if(ready.trim()){ player.push(ttsUrl(ready.trim(), firstCallChunk)); firstCallChunk=false; }
+          if(ready.trim()){ player.push({u:ttsUrl(ready.trim(), firstCallChunk, callEmo), t:ready}); firstCallChunk=false; }
           spoken=keep;
-          if(final && keep.trim()){ player.push(ttsUrl(keep.trim(), false)); spoken=''; }
+          if(final && keep.trim()){ player.push({u:ttsUrl(keep.trim(), false, callEmo), t:keep}); spoken=''; }
         };
         while(true){
           const {done,value}=await reader.read(); if(done) break;
@@ -650,21 +988,31 @@ async function listenLoop(){
           while((i=acc.indexOf('\n\n'))>=0){
             const chunk=acc.slice(0,i); acc=acc.slice(i+2);
             if(!chunk.startsWith('data:'))continue;
-            const ev=JSON.parse(chunk.slice(5).trim());
+            let ev; try{ ev=JSON.parse(chunk.slice(5).trim()); }catch(e){ continue; }
+            if(ev.type==='ping') continue;
             if(ev.type==='delta'){ buf2+=ev.t; spoken+=ev.t;
               csaid.textContent=(reply=clean(buf2))||'…';
               // 攒到句子就立刻合成
-              if(/[。！？!?…~～\n]/.test(ev.t) ||
-                 (spoken.length>=3 && /[，,、；;：:]/.test(ev.t)) ||
-                 spoken.length>=14){ flush(false); }
+              // 第一句：只要有 3 个字就立刻合成，抢首字出声
+              const _punct = /[。！？!?…~～，,、]/;
+              if(firstCallChunk && (spoken.length >= 6 || (_punct.test(ev.t) && spoken.length >= 3))){
+                const cut = _punct.test(spoken) ? spoken.search(_punct) + 1 : spoken.length;
+                const head = spoken.slice(0, cut);
+                spoken = spoken.slice(cut);
+                player.push({u: ttsUrl(head, true, callEmo), t: head});
+                firstCallChunk = false;
+              } else if(/[。！？!?…~～\n]/.test(ev.t) ||
+                 (spoken.length>=5 && /[，,、；;：:]/.test(ev.t)) ||
+                 spoken.length>=22){ flush(false); }
             } else if(ev.type==='done'){ reply=ev.reply||reply; flush(true);
+              try{ if(ev.emotion) setAvExpr(ev.emotion); }catch(e){}
               csaid.textContent=reply; voiceBubble(reply,null); }
           }
         }
         flush(true);
         cstat.textContent=((Date.now()-t0)/1000).toFixed(1)+'s';
       }catch(e){ cstat.textContent='断了一下'; }
-      paused=false;
+      finishing=false; paused=false;
       if(inCall) setTimeout(listenLoop,120);
     };
     rd.readAsDataURL(blob);
@@ -678,7 +1026,7 @@ document.body.addEventListener('click', ()=>{
 
 
 // ---------- 品牌信息（名字/头像/壁纸）----------
-const BRAND={name:'AI', avatar:'', wallpaper:''};
+const BRAND={name:'她', avatar:'', wallpaper:''};
 function svgAvatar(ch,color){
   return 'data:image/svg+xml;utf8,'+encodeURIComponent(
     '<svg xmlns="http://www.w3.org/2000/svg" width="76" height="76"><rect width="76" height="76" rx="38" fill="'+color+'"/><text x="38" y="48" font-size="28" text-anchor="middle" fill="#fff" font-family="sans-serif">'+ch+'</text></svg>');
@@ -693,8 +1041,6 @@ async function loadBrand(){
     if(d && d.wallpaper){ BRAND.wallpaper = d.wallpaper;
       document.documentElement.style.setProperty('--wall', `url('${d.wallpaper}')`); }
     document.title = BRAND.name;
-    var bn = document.getElementById('brandName'); if(bn) bn.textContent = BRAND.name;
-    var cn = document.getElementById('callName'); if(cn) cn.textContent = BRAND.name;
   }catch(e){}
 }
 // ---------- 口令门 ----------
@@ -853,7 +1199,13 @@ setTimeout(pollIncoming, 3000);
   };
 })();
 
+function refreshAvVer(){
+  var el=document.getElementById('avVerTxt');
+  if(!el) return;
+  el.textContent = '页面版本：' + (typeof AV_VER!=='undefined'?AV_VER:'旧版');
+}
 function refreshSvcState(){
+  refreshAvVer();
   var el = document.getElementById('svcStateTxt');
   if(!el) return;
   try{
@@ -882,40 +1234,5 @@ document.getElementById('battBtn') && (document.getElementById('battBtn').onclic
 document.getElementById('exactBtn') && (document.getElementById('exactBtn').onclick=function(){
   if(window.DafeiyuNative && DafeiyuNative.requestExactAlarm) DafeiyuNative.requestExactAlarm();
   else showTip('请在系统设置里开启闹钟权限');
-});
-
-// ---------- 外观（名字/头像/背景）----------
-async function saveBrand(kind, dataUrl){
-  try{
-    const r = await apiFetch('/api/branding/upload',{method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({kind, image:dataUrl})});
-    const d = await r.json();
-    if(d.ok){ await loadBrand(); showTip('已更新'); } else showTip('上传失败');
-  }catch(e){ showTip('上传失败'); }
-}
-document.getElementById('pickAvatar') && (document.getElementById('pickAvatar').onchange=function(){
-  const f=this.files[0]; if(!f) return;
-  const rd=new FileReader();
-  rd.onload=function(){
-    document.getElementById('avPrev').innerHTML='<img src="'+rd.result+'" style="max-width:120px;border-radius:50%">';
-    saveBrand('avatar', rd.result);
-  };
-  rd.readAsDataURL(f); this.value='';
-});
-document.getElementById('pickWall') && (document.getElementById('pickWall').onchange=function(){
-  const f=this.files[0]; if(!f) return;
-  const rd=new FileReader();
-  rd.onload=function(){
-    document.getElementById('wpPrev').innerHTML='<img src="'+rd.result+'" style="max-width:180px;border-radius:10px">';
-    saveBrand('wallpaper', rd.result);
-  };
-  rd.readAsDataURL(f); this.value='';
-});
-document.getElementById('saveName') && (document.getElementById('saveName').onclick=async function(){
-  const nm=document.getElementById('setName').value.trim(); if(!nm) return;
-  await apiFetch('/api/branding/name',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({name:nm})});
-  await loadBrand(); showTip('名字已改');
 });
 </script></body></html>

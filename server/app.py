@@ -1,16 +1,7 @@
-"""你的角色手机 App 后端（可开源版）
+"""她手机 App 后端 v2（端口 6191）。
 
-一个"给 AI 角色做个手机聊天 App"的通用后端：
-  - 聊天（流式输出）
-  - 语音回复（可接本地 TTS 服务，不接就纯文字）
-  - 语音输入（faster-whisper 本地转写，可选）
-  - 图片理解（多模态模型）
-  - 让角色画图 / 发表情包（可选，接本地出图服务）
-  - 记忆：时间轴 / 搜索 / 手动记 / 遗忘 / 周总结
-  - 主动消息 + 推送队列
-  - 访问口令（防止公网地址被陌生人用掉）
-
-所有与本机相关的路径、地址、人格都放在 config.json 里。
+流式输出、语音条、长按转文字、画画、表情包、记忆管理、通知轮询。
+页面在 chat_assets/page.html。
 """
 from __future__ import annotations
 
@@ -21,213 +12,138 @@ import os
 import random
 import re
 import sqlite3
-import threading
 import time
 import traceback
 import urllib.parse
 import urllib.request
-import uuid
+from urllib.parse import parse_qs, urlparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-ROOT = os.path.dirname(os.path.abspath(__file__))
-CFG_PATH = os.environ.get("AC_CONFIG") or os.path.join(ROOT, "..", "config.json")
+BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+INST = os.environ.get("AC_INSTANCE", r"C:\AstrBot\data")
+CFG = os.environ.get("AC_CFG", os.path.join(INST, "cmd_config.json"))
+DB = os.environ.get("AC_DB", os.path.join(INST, "data_v4.db"))
+HIST = os.environ.get("AC_HISTORY", os.path.join(BASE, "data", "chat_history.db"))
+LM_DB = os.environ.get("AC_MEMORY", os.path.join(INST, "plugin_data", "livingmemory.db"))
+ASSETS = os.environ.get("AC_ASSETS", os.path.join(BASE, "static"))
+MEME_DIR = os.environ.get("AC_MEMES", os.path.join(INST, "plugin_data", "meme_manager"))
+TTS = "http://127.0.0.1:6194/tts"
+IMG = "http://127.0.0.1:6196/generate"
+PORT = int(os.environ.get("AC_PORT", "6191"))
+PERSONA_NAME = os.environ.get("AC_NAME", "她")
+DEFAULT_PERSONA = os.environ.get(
+    "AC_PERSONA",
+    "你是她，一个住在电脑里的温柔女孩子。说话自然、口语化，别像客服。")
+PLACEHOLDER = os.path.join(BASE, "assets", "placeholder.png")
+APPEARANCE = os.environ.get("AC_APPEARANCE", os.path.join(BASE, "data", "appearance.png"))
+TOKEN_FILE = os.environ.get("AC_TOKEN_FILE", os.path.join(BASE, "data", "app_token.txt"))
 
 
-# ------------------------------------------------------------------ 配置
-DEFAULTS = {
-    "port": 6191,
-    "host": "0.0.0.0",
-    "access_token": "",
-    "persona": {
-        "name": "你的角色",
-        "source": "file",            # file | astrbot_db
-        "file": "persona.txt",       # source=file 时读取的文本文件（相对仓库根）
-        "astrbot_db": "",            # source=astrbot_db 时，AstrBot 的 data_v4.db 路径
-    },
-    "llm": {
-        "base_url": "https://api.deepseek.com/v1",
-        "api_key": "",
-        "model": "deepseek-chat",
-        "temperature": 0.9,
-        "max_tokens": 800,
-        "call_max_tokens": 120,
-    },
-    "tts": {
-        "endpoint": "",              # 例如 http://127.0.0.1:6194/tts，留空=不发声
-        "emotion_enabled": True,
-    },
-    "image": {
-        "endpoint": "",              # 例如 http://127.0.0.1:6196/generate，留空=不画图
-        "identity_prefix": "",       # 例如 "mychar, 1girl, "，画图时拼在描述前面
-        "model": "anime",
-    },
-    "stt": {
-        "enabled": True,
-        "model": "base",
-        "ffmpeg": "ffmpeg",
-    },
-    "memory": {
-        "astrbot_livingmemory_db": "",   # 留空=只用本地记忆
-        "local_db": "data/chat.db",
-        "recall_pool": 1500,
-    },
-    "meme_dir": "",                  # 表情包图片目录，留空=不用表情包
-    "assets_dir": "../assets",       # 放 icon/wallpaper 的目录
-    "proactive": {
-        "enabled": True,
-        "idle_minutes": 30,
-        "interval_minutes": 10,
-        "active_hours": [8, 23],
-    },
-}
+def _load_token() -> str:
+    try:
+        return open(TOKEN_FILE, encoding="utf-8").read().strip()
+    except Exception:
+        return ""
 
 
-def _deep_merge(base: dict, override: dict) -> dict:
-    out = dict(base)
-    for k, v in (override or {}).items():
-        if isinstance(v, dict) and isinstance(out.get(k), dict):
-            out[k] = _deep_merge(out[k], v)
-        else:
-            out[k] = v
-    return out
+TOKEN = _load_token()
 
 
-def load_config() -> dict:
-    cfg = DEFAULTS
-    if os.path.exists(CFG_PATH):
-        cfg = _deep_merge(DEFAULTS, json.load(open(CFG_PATH, encoding="utf-8-sig")))
-    for env, path in (
-        ("AC_TOKEN", ("access_token",)),
-        ("AC_LLM_KEY", ("llm", "api_key")),
-        ("AC_LLM_BASE", ("llm", "base_url")),
-        ("AC_LLM_MODEL", ("llm", "model")),
-        ("AC_TTS", ("tts", "endpoint")),
-        ("AC_IMAGE", ("image", "endpoint")),
-        ("AC_PORT", ("port",)),
-    ):
-        val = os.environ.get(env)
-        if val:
-            node = cfg
-            for part in path[:-1]:
-                node = node.setdefault(part, {})
-            node[path[-1]] = int(val) if path[-1] == "port" else val
-    return cfg
+def check_token(handler) -> bool:
+    if not TOKEN:
+        return True
+    got = handler.headers.get("X-Token") or ""
+    if not got:
+        q = urllib.parse.parse_qs(urllib.parse.urlparse(handler.path).query)
+        got = (q.get("t") or [""])[0]
+    if not got:
+        for part in (handler.headers.get("Cookie") or "").split(";"):
+            k, _, v = part.strip().partition("=")
+            if k == "dafeiyu_token":
+                got = v
+    return got == TOKEN
+
+TOOL_HINT = """
+想给他打电话时（想听听他声音、或者有话当面说），写 [call]接通后你说的第一句[/call]，系统会真的拨过去。
+
+【手机 App 里的额外能力】
+- 想给他看图时，在回复里写 [draw]画面描述[/draw]，系统会自动画好发给他。描述要具体（人物、动作、场景、光线）。
+- 想发表情包时，写 [meme]关键词[/meme]。
+- 这两个标记不会被念出来、也不显示成文字。没必要就别用。
+"""
 
 
-CFG = load_config()
-PERSONA_CFG = CFG["persona"]
-LLM = CFG["llm"]
-TTS_CFG = CFG["tts"]
-IMG_CFG = CFG["image"]
-MEM_CFG = CFG["memory"]
-_repo = os.path.dirname(ROOT)
-_ad = CFG.get("assets_dir") or "assets"
-ASSETS = _ad if os.path.isabs(_ad) else os.path.normpath(os.path.join(_repo, _ad))
-_ld = MEM_CFG.get("local_db") or "data/chat.db"
-LOCAL_DB = _ld if os.path.isabs(_ld) else os.path.normpath(os.path.join(_repo, _ld))
-BRAND_DIR = os.path.normpath(os.path.join(_repo, CFG.get("branding", {}).get("dir", "data/branding")))
-os.makedirs(BRAND_DIR, exist_ok=True)
-TOKEN = (CFG.get("access_token") or "").strip()
-PORT = int(CFG.get("port") or 6191)
-HOST = CFG.get("host") or "0.0.0.0"
+def load_provider() -> dict:
+    """优先读环境变量；没有 AstrBot 配置也能单独跑。"""
+    prov = {"key": os.environ.get("AC_PROVIDER_KEY", ""),
+            "base": (os.environ.get("AC_PROVIDER_BASE", "https://api.deepseek.com/v1")).rstrip("/"),
+            "model": os.environ.get("AC_PROVIDER_MODEL", "deepseek-chat")}
+    try:
+        c = json.load(open(CFG, encoding="utf-8-sig"))
+        src = c["provider_sources"][0]
+        key = src.get("key")
+        if isinstance(key, list):
+            key = key[0]
+        if key:
+            prov["key"] = key
+            prov["base"] = (src.get("api_base") or prov["base"]).rstrip("/")
+            prov["model"] = c["provider"][0].get("model", prov["model"])
+    except Exception:
+        pass
+    return prov
 
 
-# ------------------------------------------------------------------ 人格
 def load_persona() -> str:
-    src = PERSONA_CFG.get("source", "file")
-    if src == "astrbot_db" and PERSONA_CFG.get("astrbot_db"):
-        try:
-            db = PERSONA_CFG["astrbot_db"]
-            con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
-            row = con.execute(
-                "SELECT system_prompt FROM personas WHERE persona_id=? "
-                "ORDER BY updated_at DESC LIMIT 1",
-                (PERSONA_CFG.get("name", ""),)).fetchone()
-            con.close()
-            if row and row[0]:
-                return row[0]
-        except Exception:
-            traceback.print_exc()
-    path = PERSONA_CFG.get("file") or "persona.txt"
-    if not os.path.isabs(path):
-        path = os.path.normpath(os.path.join(os.path.dirname(ROOT), path))
-    if os.path.exists(path):
-        return open(path, encoding="utf-8").read().strip()
-    return "你是一个住在电脑里的 AI 角色，说话自然、简短、有性格。"
+    try:
+        con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
+        row = con.execute(
+            "SELECT system_prompt FROM personas WHERE persona_id=? ORDER BY updated_at DESC LIMIT 1",
+            (PERSONA_NAME,)).fetchone()
+        con.close()
+        return (row[0] if row else "") or os.environ.get("AC_PERSONA", DEFAULT_PERSONA)
+    except Exception:
+        return os.environ.get("AC_PERSONA", DEFAULT_PERSONA)
 
 
 PERSONA = load_persona()
+PROV = load_provider()
 
 
-def tool_hint() -> str:
-    hints = []
-    if IMG_CFG.get("endpoint"):
-        hints.append("- 想给他看图时，在回复里写 [draw]画面描述[/draw]，系统会自动画好发给他。")
-        if CFG.get("meme_dir"):
-            hints.append("- 想发表情包时，写 [meme]关键词[/meme]。")
-        hints.append("- 这两个标记不会被念出来、也不显示成文字。没必要就别用。")
-    return ("\n【额外能力】\n" + "\n".join(hints)) if hints else ""
-
-
-TOOL_HINT = tool_hint()
-
-
-# ------------------------------------------------------------------ 本地存储（历史）
-os.makedirs(os.path.dirname(LOCAL_DB) or ".", exist_ok=True)
-
-
-def _db() -> sqlite3.Connection:
-    con = sqlite3.connect(LOCAL_DB, timeout=10)
+# ---------------------------------------------------------------- 历史
+def _hist_init() -> None:
+    con = sqlite3.connect(HIST)
     con.execute("CREATE TABLE IF NOT EXISTS msgs (id INTEGER PRIMARY KEY AUTOINCREMENT,"
                 " role TEXT, content TEXT, ts REAL)")
-    con.execute("CREATE TABLE IF NOT EXISTS memory (id INTEGER PRIMARY KEY AUTOINCREMENT,"
-                " text TEXT, ts REAL)")
-    return con
+    con.commit()
+    con.close()
 
 
 def hist_add(role: str, content: str) -> None:
-    con = _db()
+    con = sqlite3.connect(HIST)
     con.execute("INSERT INTO msgs(role, content, ts) VALUES(?,?,?)", (role, content, time.time()))
     con.commit()
     con.close()
 
 
 def hist_tail(n: int = 20) -> list[dict]:
-    con = _db()
+    con = sqlite3.connect(HIST)
     rows = con.execute("SELECT role, content FROM msgs ORDER BY id DESC LIMIT ?", (n,)).fetchall()
     con.close()
     return [{"role": r, "content": c} for r, c in reversed(rows)]
 
 
 def hist_count() -> int:
-    con = _db()
+    con = sqlite3.connect(HIST)
     n = con.execute("SELECT COUNT(*) FROM msgs").fetchone()[0]
     con.close()
     return n
 
 
-def last_activity() -> float:
-    con = _db()
-    row = con.execute("SELECT MAX(ts) FROM msgs").fetchone()
-    con.close()
-    return float(row[0] or 0)
-
-
-# ------------------------------------------------------------------ 共享记忆（可选）
-LM_DB = MEM_CFG.get("astrbot_livingmemory_db") or ""
-
-
-def lm_enabled() -> bool:
-    return bool(LM_DB) and os.path.exists(LM_DB)
-
-
+# ---------------------------------------------------------------- 共享记忆
 def lm_recall(query: str, k: int = 4) -> list[str]:
-    if not lm_enabled():
-        return []
     try:
         con = sqlite3.connect(f"file:{LM_DB}?mode=ro", uri=True)
-        rows = con.execute("SELECT text FROM documents ORDER BY id DESC LIMIT ?",
-                           (int(MEM_CFG.get("recall_pool", 1500)),)).fetchall()
+        rows = con.execute("SELECT text FROM documents ORDER BY id DESC LIMIT 1500").fetchall()
         con.close()
     except Exception:
         return []
@@ -248,107 +164,109 @@ def lm_recall(query: str, k: int = 4) -> list[str]:
 
 
 def lm_write(summary: str) -> None:
-    if lm_enabled():
-        try:
-            now = time.time()
-            meta = {"session_id": "livingmemory:global", "persona_id": PERSONA_CFG.get("name", ""),
-                    "importance": 0.5, "create_time": now, "last_access_time": now,
-                    "status": "active", "interaction_type": "private_chat",
-                    "canonical_summary": summary, "source_session_id": "app:mobile",
-                    "has_source": False}
-            con = sqlite3.connect(LM_DB, timeout=10)
-            con.execute("INSERT INTO documents(doc_id, text, metadata, created_at, updated_at)"
-                        " VALUES(?,?,?,datetime('now'),datetime('now'))",
-                        (str(uuid.uuid4()), summary, json.dumps(meta, ensure_ascii=False)))
-            con.commit()
-            con.close()
-        except Exception:
-            traceback.print_exc()
-    # 本地也留一份（没接 livingmemory 时，记忆面板靠它）
-    try:
-        con = _db()
-        con.execute("CREATE TABLE IF NOT EXISTS memory (id INTEGER PRIMARY KEY AUTOINCREMENT,"
-                    " text TEXT, ts REAL)")
-        con.execute("INSERT INTO memory(text, ts) VALUES(?,?)", (summary, time.time()))
-        con.commit()
-        con.close()
-    except Exception:
-        traceback.print_exc()
+    import uuid
 
-
-def memory_rows(limit: int = 80) -> list[dict]:
-    if lm_enabled():
-        try:
-            con = sqlite3.connect(f"file:{LM_DB}?mode=ro", uri=True)
-            rows = con.execute("SELECT id, text, created_at FROM documents "
-                               "ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
-            con.close()
-            return [{"id": r[0], "text": (r[1] or "")[:300], "time": str(r[2])} for r in rows]
-        except Exception:
-            pass
-    try:
-        con = _db()
-        rows = con.execute("SELECT id, text, ts FROM memory ORDER BY id DESC LIMIT ?",
-                           (limit,)).fetchall()
-        con.close()
-    except Exception:
-        return []
-    return [{"id": r[0], "text": (r[1] or "")[:300],
-             "time": time.strftime("%Y-%m-%d %H:%M", time.localtime(r[2] or 0))} for r in rows]
-
-
-def memory_search(q: str, k: int = 10) -> list[dict]:
-    rows = memory_rows(2000)
-    qs = set(q[i:i + 2] for i in range(max(0, len(q) - 1)))
-    hits = []
-    for r in rows:
-        g = set(r["text"][i:i + 2] for i in range(max(0, len(r["text"]) - 1)))
-        sc = len(qs & g) / max(1, len(qs))
-        if sc > 0.1:
-            hits.append({**r, "score": round(sc, 2)})
-    hits.sort(key=lambda x: -x["score"])
-    return hits[:k]
-
-
-def memory_delete(mid) -> None:
-    table = "documents" if lm_enabled() else "memory"
-    db = LM_DB if lm_enabled() else LOCAL_DB
-    con = sqlite3.connect(db, timeout=10)
-    con.execute(f"DELETE FROM {table} WHERE id=?", (mid,))
+    now = time.time()
+    meta = {"session_id": "livingmemory:global", "persona_id": PERSONA_NAME, "importance": 0.5,
+            "create_time": now, "last_access_time": now, "status": "active",
+            "interaction_type": "private_chat", "canonical_summary": summary,
+            "source_session_id": "app:mobile", "has_source": False}
+    con = sqlite3.connect(LM_DB, timeout=10)
+    con.execute("INSERT INTO documents(doc_id, text, metadata, created_at, updated_at)"
+                " VALUES(?,?,?,datetime('now'),datetime('now'))",
+                (str(uuid.uuid4()), summary, json.dumps(meta, ensure_ascii=False)))
     con.commit()
     con.close()
 
 
-# ------------------------------------------------------------------ 模型
+def lm_timeline(days: int = 7) -> list[dict]:
+    try:
+        con = sqlite3.connect(f"file:{LM_DB}?mode=ro", uri=True)
+        rows = con.execute(
+            "SELECT text, created_at FROM documents WHERE created_at >= datetime('now', ?)"
+            " ORDER BY id DESC LIMIT 80", (f"-{days} days",)).fetchall()
+        con.close()
+    except Exception:
+        return []
+    return [{"text": (t or "")[:300], "time": str(c)} for t, c in rows]
+
+
+def lm_search(q: str, k: int = 10) -> list[dict]:
+    try:
+        con = sqlite3.connect(f"file:{LM_DB}?mode=ro", uri=True)
+        rows = con.execute(
+            "SELECT id, text, created_at FROM documents ORDER BY id DESC LIMIT 2000").fetchall()
+        con.close()
+    except Exception:
+        return []
+    qs = set(q[i:i + 2] for i in range(max(0, len(q) - 1)))
+    hits = []
+    for mid, text, ts in rows:
+        if not text:
+            continue
+        g = set(text[i:i + 2] for i in range(max(0, len(text) - 1)))
+        sc = len(qs & g) / max(1, len(qs))
+        if sc > 0.1:
+            hits.append({"id": mid, "text": text[:300], "time": str(ts), "score": round(sc, 2)})
+    hits.sort(key=lambda x: -x["score"])
+    return hits[:k]
+
+
+# ---------------------------------------------------------------- 模型
+def _vision_desc(img_data_url: str, hint: str = "") -> str:
+    """让视觉模型用一句话描述这张图，给文本模型当眼睛。"""
+    if not (VISION_CFG["key"] and img_data_url):
+        return ""
+    try:
+        msgs = [
+            {"role": "system", "content": "你只做客观描述，不评论、不扮演角色。"},
+            {"role": "user", "content": [
+                {"type": "text", "text": (hint or "用一句话客观描述这张图里有什么，"
+                                                 "特别注意人的外貌、穿着、动作、表情和环境，40 字以内。")},
+                {"type": "image_url", "image_url": {"url": img_data_url}}]}]
+        return vision_chat(msgs, 160)
+    except Exception:
+        traceback.print_exc()
+        return ""
+
+
 def _messages(text: str, call_mode: bool = False, max_hist: int = 20) -> list[dict]:
-    persona = PERSONA[:1200] if call_mode else PERSONA
     extra = "" if call_mode else TOOL_HINT
+    persona = PERSONA
     if call_mode:
-        extra = ("\n【现在是打电话】第一句先来一个很短的回应（两到六个字），"
-                 "后面再补一句，总共不超过三句。别列点、别长篇大论。")
+        persona = PERSONA[:1200]
+        extra += "\n（这是语音通话，回答短，别啰嗦）"
+    if call_mode:
+        extra += ("\n【现在是打电话】你正在跟他语音通话："
+                  "第一句先来一个很短的回应（两到六个字，比如「嗯」「知道啦」「啊？」），"
+                  "后面再补一句，总共不超过三句。别列点、别长篇大论，像真的在讲电话。"
+                  "不画图、不发表情。")
     msgs = [{"role": "system", "content": persona + extra}]
-    if text and not call_mode:
-        mem = lm_recall(text)
+    if text:
+        mem = lm_recall(text, 2 if call_mode else 4)
         if mem:
             msgs.append({"role": "system",
                          "content": "【你记得的事】\n" + "\n".join("- " + m for m in mem)})
-    msgs += hist_tail(6 if call_mode else max_hist)
+    msgs += hist_tail(max_hist)
+    # 摄像头那一帧：先用视觉模型看一眼，再把"看到什么"塞进她脑子里
+    try:
+        # 视觉描述是后台算的，这里只读结果，不等待
+        if VISION_DESC["text"] and time.time() - VISION_DESC["ts"] < 120:
+            msgs.insert(1, {"role": "system",
+                            "content": "【你刚抬眼看了他摄像头一眼】看到：" + VISION_DESC["text"] +
+                                       "\n（可以自然提一句你看到的，别像在念描述。）"})
+    except Exception:
+        pass
     return msgs
 
 
-def _llm_request(messages, max_tokens, stream=False):
-    body = json.dumps({"model": LLM["model"], "messages": messages,
-                       "temperature": LLM.get("temperature", 0.9),
-                       "max_tokens": max_tokens, "stream": stream}).encode()
-    req = urllib.request.Request(
-        LLM["base_url"].rstrip("/") + "/chat/completions", data=body,
-        headers={"Content-Type": "application/json",
-                 "Authorization": f"Bearer {LLM['api_key']}"}, method="POST")
-    return urllib.request.urlopen(req, timeout=180)
-
-
 def llm_stream(msgs: list[dict], max_tokens: int = 800):
-    with _llm_request(msgs, max_tokens, stream=True) as r:
+    body = json.dumps({"model": PROV["model"], "messages": msgs, "temperature": 0.9,
+                       "max_tokens": max_tokens, "stream": True}).encode()
+    req = urllib.request.Request(PROV["base"] + "/chat/completions", data=body,
+                                 headers={"Content-Type": "application/json",
+                                          "Authorization": f"Bearer {PROV['key']}"}, method="POST")
+    with urllib.request.urlopen(req, timeout=180) as r:
         for raw in r:
             line = raw.decode("utf-8", "ignore").strip()
             if not line.startswith("data:"):
@@ -364,31 +282,47 @@ def llm_stream(msgs: list[dict], max_tokens: int = 800):
                 yield delta
 
 
-def friendly_llm_error(exc: Exception) -> str:
-    msg = str(exc)
-    if "401" in msg or "invalid_api_key" in msg.lower():
-        return "模型密钥不对，去 config.json 里改 llm.api_key"
-    if "402" in msg or "quota" in msg.lower() or "余额" in msg:
-        return "模型账号没额度了"
-    if "timeout" in msg.lower():
-        return "模型响应超时，再试一次"
-    return f"模型调用失败：{msg[:120]}"
-
-
 def llm_once(msgs: list[dict], max_tokens: int = 800) -> str:
-    with _llm_request(msgs, max_tokens, stream=False) as r:
+    body = json.dumps({"model": PROV["model"], "messages": msgs, "temperature": 0.9,
+                       "max_tokens": max_tokens}).encode()
+    req = urllib.request.Request(PROV["base"] + "/chat/completions", data=body,
+                                 headers={"Content-Type": "application/json",
+                                          "Authorization": f"Bearer {PROV['key']}"}, method="POST")
+    with urllib.request.urlopen(req, timeout=180) as r:
         return json.loads(r.read().decode())["choices"][0]["message"]["content"] or ""
 
 
-# ------------------------------------------------------------------ 语音
+# ---------------------------------------------------------------- 语音
 EMO_RULES = [
+    # 正在挨打 → 疼得喊出来
+    ("spank", ("打屁股", "挨打", "打你屁", "拍你", "打你", "好痛", "疼")),
+    # 只是提到 → 害羞
+    ("embarrassed", ("屁股", "屁屁")),
     ("sob", ("呜", "哭", "委屈", "眼泪", "抽气")),
-    ("sultry", ("亲亲", "抱紧", "贴着", "耳边", "撩", "害羞", "脸红", "别看我")),
+    ("sultry", ("亲亲", "抱紧", "贴着", "耳边", "涩涩", "色色", "撩", "害羞", "脸红", "别看我")),
     ("happy", ("哈哈", "笑死", "开心", "喜欢", "太好")),
     ("coquettish", ("嘛", "好不好", "抱抱", "想要")),
     ("sleepy", ("困", "睡", "哈欠")),
     ("angry", ("生气", "讨厌", "哼", "烦")),
 ]
+
+
+CALL_REQUEST_WORDS = ("打电话给我", "打给我", "给我打电话", "打个电话", "打电话过来",
+                      "主动打给我", "你打给我", "call我", "电话打给我")
+
+
+def wants_call(text: str) -> bool:
+    return any(w in (text or "") for w in CALL_REQUEST_WORDS)
+
+
+def queue_call_now(line: str = "") -> dict:
+    """立刻给她排一通来电（用户要求时用）。"""
+    text = (line or "").strip() or "喂？我打过来了，能听见吗"
+    audio = tts_b64(text, fast=True)
+    item = {"text": text, "ts": time.time(), "kind": "call", "audio": audio}
+    push_unread(item)
+    hist_add("assistant", text)
+    return item
 
 
 def pick_emotion(text: str) -> str:
@@ -398,17 +332,16 @@ def pick_emotion(text: str) -> str:
     return "charm"
 
 
-def tts_b64(text: str, fast: bool = False) -> str | None:
-    if not (text or "").strip() or not TTS_CFG.get("endpoint"):
+def tts_b64(text: str, fast: bool = False, emo: str = "") -> str | None:
+    if not (text or "").strip():
         return None
     try:
-        body = {"text": text, "emotion": "charm" if fast else pick_emotion(text)}
+        body = {"text": text, "emotion": (emo or pick_emotion(text))}
         if fast:
+            body["instruction"] = ""
             body["fast"] = True
-        req = urllib.request.Request(TTS_CFG["endpoint"],
-                                     data=json.dumps(body).encode(),
-                                     headers={"Content-Type": "application/json"},
-                                     method="POST")
+        req = urllib.request.Request(TTS, data=json.dumps(body).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
         with urllib.request.urlopen(req, timeout=300) as r:
             raw = r.read()
         return ("data:audio/mp3;base64," + base64.b64encode(raw).decode()) if raw else None
@@ -417,46 +350,15 @@ def tts_b64(text: str, fast: bool = False) -> str | None:
         return None
 
 
-# ------------------------------------------------------------------ 画图 / 表情
-_DRAW_RE = re.compile(r"\[draw\](.*?)(?:\[/draw\]|</draw[>\]]|$)", re.S)
-_MEME_RE = re.compile(r"\[meme\](.*?)(?:\[/meme\]|</meme[>\]]|$)", re.S)
-_CLEAN = re.compile(r"\[\[.*?\]\]|【[^】]{0,6}】|<[^>]{1,30}>")
-
-# 有些模型会把内部审核记录直接吐进正文，整段切掉
-SAFETY_MARK = re.compile(r"用户未成年|露骨色情|ds_safety", re.I)
-SAFETY_END = re.compile(
-    r"(?:safe(?:ty)?|CFT|安全规则|规则)[^，,。\n]{0,14}[，,。:：、]?", re.I)
-
-
-def strip_safety(text: str) -> str:
-    head = (text or "")[:260]
-    if not SAFETY_MARK.search(head):
-        return text
-    last = None
-    for m in SAFETY_END.finditer(head):
-        last = m
-    if last is None:
-        return ""
-    return text[last.end():].lstrip("，,。:：、 \t\n")
-
-
-def clean_reply(t: str) -> str:
-    t = strip_safety(t or "")
-    t = _DRAW_RE.sub("", t)
-    t = _MEME_RE.sub("", t)
-    return _CLEAN.sub("", t).strip()
-
-
+# ---------------------------------------------------------------- 画图 / 表情
 def draw_image(prompt: str) -> str | None:
-    if not IMG_CFG.get("endpoint"):
-        return None
     try:
-        full = (IMG_CFG.get("identity_prefix") or "") + prompt + ", masterpiece, best quality"
-        req = urllib.request.Request(IMG_CFG["endpoint"],
-                                     data=json.dumps({"prompt": full,
-                                                      "model": IMG_CFG.get("model", "anime")}).encode(),
-                                     headers={"Content-Type": "application/json"},
-                                     method="POST")
+        ident = ("dafeiyu, 1girl, solo, chibi, very long blue hair, blue eyes, "
+                 "round face, baby fat, ")
+        full = ident + prompt + ", masterpiece, best quality, detailed"
+        req = urllib.request.Request(IMG, data=json.dumps(
+            {"prompt": full, "model": "anime", "crop_bottom": 0.02}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
         with urllib.request.urlopen(req, timeout=600) as r:
             data = json.loads(r.read().decode())
         path = data.get("path")
@@ -474,13 +376,13 @@ def draw_image(prompt: str) -> str | None:
         return None
 
 
-def pick_meme() -> str | None:
-    d = CFG.get("meme_dir") or ""
-    if not d or not os.path.isdir(d):
-        return None
+def pick_meme(keyword: str = "") -> str | None:
     try:
-        files = [os.path.join(r, n) for r, _ds, ns in os.walk(d) for n in ns
-                 if n.lower().endswith((".jpg", ".png", ".jpeg", ".gif"))]
+        files = []
+        for root, _dirs, names in os.walk(MEME_DIR):
+            for n in names:
+                if n.lower().endswith((".jpg", ".png", ".gif", ".jpeg")):
+                    files.append(os.path.join(root, n))
         if not files:
             return None
         from PIL import Image
@@ -494,102 +396,128 @@ def pick_meme() -> str | None:
         return None
 
 
+_DRAW_RE = re.compile(r"\[draw\](.*?)(?:\[/draw\]|</draw[>\]]|\[／draw\]|$)", re.S)
+_MEME_RE = re.compile(r"\[meme\](.*?)(?:\[/meme\]|</meme[>\]]|$)", re.S)
+_CLEAN = re.compile(r"\[\[.*?\]\]|【[^】]{0,6}】|<[^>]{1,30}>")
+
+# 模型偶尔把内部审核记录直接吐进正文，整段切掉
+SAFETY_MARK = re.compile(r"用户未成年|露骨色情|ds_safety", re.I)
+SAFETY_END = re.compile(
+    r"(?:safe(?:ty)?|CFT|安全规则|规则)[^，,。\n]{0,14}[，,。:：、]?", re.I)
+
+
+def strip_safety(text: str) -> str:
+    head = (text or "")[:260]
+    if not SAFETY_MARK.search(head):
+        return text
+    last = None
+    for m in SAFETY_END.finditer(head):
+        last = m
+    if last is None:
+        return ""
+    return text[last.end():].lstrip("，,。:：、 \t\n")
+
+
+CALL_TAG_RE = re.compile(r"\[call\](.*?)(?:\[/call\]|\[／call\]|$)", re.S)
+
+
+def extract_call(text: str):
+    """抽出 [call]...[/call]：返回 (剩余正文, 接通后第一句)。"""
+    m = CALL_TAG_RE.search(text or "")
+    if not m:
+        return text, ""
+    return CALL_TAG_RE.sub("", text).strip(), (m.group(1) or "").strip()
+
+
+def clean_reply(t: str) -> str:
+    t = _DRAW_RE.sub("", t or "")
+    t = _MEME_RE.sub("", t)
+    return _CLEAN.sub("", t).strip()
+
+
 _unread: list[dict] = []
 
 
-def post_process(raw: str, text: str) -> dict:
+def push_unread(item: dict) -> None:
+    _unread.append(item)
+
+
+_LAST_DECIDE_RAW = ""
+VISION = {"img": "", "ts": 0.0}
+VISION_DESC = {"text": "", "ts": 0.0}
+VISION_FILE = r"C:\rvc\vision.json"
+VISION_CFG = {"base": "", "model": "", "key": ""}
+
+
+def _load_vision():
+    try:
+        d = json.load(open(VISION_FILE, encoding="utf-8-sig"))
+        VISION_CFG.update({k: (d.get(k) or "") for k in ("base", "model", "key")})
+        if VISION_CFG["key"]:
+            print(f"[chat] 视觉模型已配置：{VISION_CFG['model']}", flush=True)
+    except Exception:
+        print("[chat] 未配置视觉模型（发图片/视频通话时她看不见）", flush=True)
+
+
+def vision_chat(msgs: list[dict], max_tokens: int = 500) -> str:
+    """调用视觉模型（OpenAI 兼容接口）。没配就返回空。"""
+    cfg = VISION_CFG
+    if not (cfg["key"] and cfg["base"] and cfg["model"]):
+        return ""
+    body = json.dumps({"model": cfg["model"], "messages": msgs,
+                       "temperature": 0.9, "max_tokens": max_tokens}).encode()
+    req = urllib.request.Request(cfg["base"].rstrip("/") + "/chat/completions", data=body,
+                                 headers={"Content-Type": "application/json",
+                                          "Authorization": f"Bearer {cfg['key']}"}, method="POST")
+    with urllib.request.urlopen(req, timeout=120) as r:
+        d = json.loads(r.read().decode())
+    return (d["choices"][0]["message"]["content"] or "").strip()
+PENDING_HITS = {"peek": 0, "pop": 0, "last_ua": "", "last_pop_ua": ""}
+RECENT_REQS: list = []
+
+
+def peek_unread() -> list[dict]:
+    return list(_unread)
+
+
+def pop_unread() -> list[dict]:
+    global _unread
+    batch, _unread = _unread, []
+    return batch
+
+
+def _post_process(raw: str, text: str) -> dict:
+    raw, _call_line = extract_call(raw)
+    if _call_line:
+        try:
+            queue_call_now(clean_reply(_call_line))
+        except Exception:
+            traceback.print_exc()
     draws = [d.strip() for d in _DRAW_RE.findall(raw) if d.strip()]
     memes = _MEME_RE.findall(raw)
     reply = clean_reply(raw)
     if not reply:
-        reply = "画好了" if draws else "……"
+        reply = "画好了，看看像不像我" if _DRAW_RE.search(raw) else "……"
     hist_add("assistant", reply)
     try:
-        lm_write(f"[{time.strftime('%Y-%m-%d %H:%M')} App] 用户：{text[:80]}；我：{reply[:80]}"[:600])
+        lm_write(f"[{time.strftime('%Y-%m-%d %H:%M')} 手机APP] 包包说：{text[:80]}；我回：{reply[:80]}"[:600])
     except Exception:
-        pass
+        traceback.print_exc()
     images = []
     for d in draws[:2]:
         img = draw_image(d)
         if img:
             images.append(img)
-    if memes and not images and not images:
+            hist_add("assistant", f"[图片] {d[:60]}")
+    if memes and not images:
         m = pick_meme()
         if m:
             images.append(m)
-    return {"ok": True, "reply": reply, "audio": tts_b64(reply), "images": images,
-            "emotion": pick_emotion(reply)}
-
-
-# ------------------------------------------------------------------ 品牌素材（用户自传）
-def _find_brand(name: str) -> str | None:
-    for ext in ("png", "jpg", "jpeg", "webp"):
-        fp = os.path.join(BRAND_DIR, f"{name}.{ext}")
-        if os.path.exists(fp):
-            return fp
-    return None
-
-
-def brand_name() -> str:
-    fp = os.path.join(BRAND_DIR, "name.txt")
-    if os.path.exists(fp):
-        return open(fp, encoding="utf-8").read().strip() or PERSONA_CFG.get("name", "AI")
-    return PERSONA_CFG.get("name", "AI")
-
-
-def brand_info() -> dict:
-    ver = int(time.time())
-    av, wp = _find_brand("avatar"), _find_brand("wallpaper")
-    return {
-        "name": brand_name(),
-        "avatar": f"/static/custom/avatar?v={ver}" if av else "",
-        "wallpaper": f"/static/custom/wallpaper?v={ver}" if wp else "",
-    }
-
-
-def save_brand(kind: str, data_url: str) -> bool:
-    if kind not in ("avatar", "wallpaper"):
-        return False
-    try:
-        head, b64 = data_url.split(",", 1) if "," in data_url else ("", data_url)
-        raw = base64.b64decode(b64)
-        from PIL import Image
-        import io as _io
-
-        img = Image.open(_io.BytesIO(raw)).convert("RGB")
-        if kind == "avatar":
-            side = min(img.size)
-            img = img.crop(((img.width - side) // 2, (img.height - side) // 2,
-                            (img.width + side) // 2, (img.height + side) // 2))
-            img = img.resize((512, 512), Image.LANCZOS)
-        else:
-            img.thumbnail((1440, 2560), Image.LANCZOS)
-        for ext in ("png", "jpg", "jpeg", "webp"):
-            old = os.path.join(BRAND_DIR, f"{kind}.{ext}")
-            if os.path.exists(old):
-                os.remove(old)
-        img.save(os.path.join(BRAND_DIR, f"{kind}.jpg"), "JPEG", quality=88)
-        return True
-    except Exception:
-        traceback.print_exc()
-        return False
-
-
-# ------------------------------------------------------------------ 鉴权
-def check_token(handler) -> bool:
-    if not TOKEN:
-        return True
-    got = handler.headers.get("X-Token") or ""
-    if not got:
-        q = urllib.parse.parse_qs(urllib.parse.urlparse(handler.path).query)
-        got = (q.get("t") or [""])[0]
-    if not got:
-        cookie = handler.headers.get("Cookie") or ""
-        for part in cookie.split(";"):
-            k, _, v = part.strip().partition("=")
-            if k == "aicompanion_token":
-                got = v
-    return got == TOKEN
+    # 短回复直接给整段音频；长回复让前端按句要，第一句能早 2-4 秒出声
+    emo = pick_emotion((text or "") + " " + reply)
+    audio = tts_b64(reply, fast=True, emo=emo) if len(reply) <= 16 else None
+    return {"ok": True, "reply": reply, "audio": audio, "images": images,
+            "emotion": emo}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -598,7 +526,6 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
-    # ---------- 输出工具 ----------
     def _json(self, code: int, payload: dict):
         b = json.dumps(payload, ensure_ascii=False).encode()
         self.send_response(code)
@@ -617,89 +544,140 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def _need_auth(self) -> bool:
-        if check_token(self):
-            return False
-        self._json(401, {"ok": False, "error": "需要访问口令", "need_token": True})
-        return True
-
-    # ---------- GET ----------
     def do_GET(self):
         path, _, query = self.path.partition("?")
         q = dict(urllib.parse.parse_qsl(query))
+        _open = ("/api/auth", "/api/health", "/api/debug/service_up")
+        _peek = (path == "/api/pending" and q.get("peek") == "1")
+        if path.startswith("/api/") and path not in _open and not _peek and not check_token(self):
+            self._json(401, {"ok": False, "error": "需要访问口令", "need_token": True})
+            return
         try:
             if path in ("/", "/index.html"):
-                self._file(os.path.join(ROOT, "page.html"), "text/html; charset=utf-8")
-            elif path.startswith("/static/custom/"):
-                kind = "avatar" if "avatar" in path else "wallpaper"
-                fp = _find_brand(kind)
-                if not fp:
-                    self._json(404, {"error": "no custom asset"})
-                    return
-                self._file(fp, "image/jpeg", "public, max-age=60")
+                self._file(os.path.join(ASSETS, "page.html"), "text/html; charset=utf-8")
+            elif path == "/source.zip":
+                zp = r"C:\rvc\output\ai-companion-app.zip"
+                if os.path.exists(zp):
+                    data = open(zp, "rb").read()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/zip")
+                    self.send_header("Content-Disposition",
+                                     'attachment; filename="ai-companion-app.zip"')
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                else:
+                    self._json(404, {"error": "no zip"})
+            elif path in ("/apk", "/dafeiyu.apk"):
+                apk = r"C:\rvc\output\Dafeiyu.apk"
+                if os.path.exists(apk):
+                    data = open(apk, "rb").read()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/vnd.android.package-archive")
+                    self.send_header("Content-Disposition", 'attachment; filename="Dafeiyu.apk"')
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                else:
+                    self._json(404, {"error": "no apk"})
+            elif path == "/l2d3":
+                self._file(os.path.join(ASSETS, "l2d3.html"), "text/html; charset=utf-8")
+            elif path == "/l2d2":
+                self._file(os.path.join(ASSETS, "l2d2.html"), "text/html; charset=utf-8")
+            elif path == "/l2d":
+                self._file(os.path.join(ASSETS, "l2d.html"), "text/html; charset=utf-8")
             elif path.startswith("/static/"):
-                fn = os.path.basename(path)
-                fp = os.path.join(ASSETS, fn)
-                if not os.path.exists(fp):
-                    self._json(404, {"error": "no asset"})
+                rel = path[len("/static/"):]
+                fn = os.path.basename(rel)
+                safe = os.path.normpath(rel).replace("\\", "/")
+                if safe.startswith("..") or safe.startswith("/"):
+                    self._json(404, {"error": "bad path"})
                     return
+                if safe.startswith("avatar/"):
+                    fp = os.path.join(BASE, "assets", *safe[len("avatar/"):].split("/"))
+                else:
+                    fp = os.path.join(ASSETS, *safe.split("/"))
                 ctype = ("image/png" if fn.endswith(".png")
                          else "image/jpeg" if fn.endswith((".jpg", ".jpeg"))
                          else "application/octet-stream")
-                self._file(fp, ctype, "public, max-age=300")
-            elif path == "/apk":
-                apk = os.path.normpath(os.path.join(os.path.dirname(ROOT), "AiCompanion.apk"))
-                if not os.path.exists(apk):
-                    self._json(404, {"error": "apk not built"})
-                    return
-                data = open(apk, "rb").read()
-                self.send_response(200)
-                self.send_header("Content-Type", "application/vnd.android.package-archive")
-                self.send_header("Content-Disposition", 'attachment; filename="AiCompanion.apk"')
-                self.send_header("Content-Length", str(len(data)))
-                self.end_headers()
-                self.wfile.write(data)
+                if os.path.exists(fp):
+                    cache = "no-store" if "/l2d/" in rel else "public, max-age=300"
+                    self._file(fp, ctype, cache)
+                else:
+                    self._json(404, {"error": "no asset"})
+            elif path == "/api/proactive_tick":
+                offline = bool(payload.get("offline"))
+                hard = bool(payload.get("force"))
+                self._json(200, {"ok": True, "result": _proactive_tick(force_offline=offline, force=hard)})
+            elif path == "/api/appearance":
+                fp = APPEARANCE if os.path.exists(APPEARANCE) else PLACEHOLDER
+                self._file(fp, "image/png", "no-store")
+            elif path == "/api/emotion":
+                q3 = parse_qs(urlparse(self.path).query)
+                t3 = (q3.get("text", [""])[0] or "").strip()
+                self._json(200, {"ok": True, "emotion": pick_emotion(t3)})
             elif path == "/manifest.json":
-                _b = brand_info()
-                _icons = ([{"src": _b["avatar"], "sizes": "512x512", "type": "image/jpeg"}]
-                          if _b["avatar"] else [])
-                self._json(200, {
-                    "name": _b["name"], "short_name": _b["name"],
-                    "start_url": "/", "display": "standalone",
-                    "background_color": "#0b1020", "theme_color": "#0b1020",
-                    "icons": _icons})
-            elif path == "/api/health":
-                self._json(200, {"ok": True, "persona_len": len(PERSONA), "model": LLM["model"],
-                                 "tts": bool(TTS_CFG.get("endpoint")),
-                                 "image": bool(IMG_CFG.get("endpoint")),
-                                 "shared_memory": lm_enabled(),
-                                 "auth": bool(TOKEN)})
-            elif path == "/api/branding":
-                self._json(200, {"ok": True, **brand_info()})
+                self._json(200, {"name": PERSONA_NAME, "short_name": PERSONA_NAME, "start_url": "/",
+                                 "display": "standalone", "background_color": "#0b1020",
+                                 "theme_color": "#0b1020",
+                                 "icons": [{"src": "/static/icon-192.png", "sizes": "192x192",
+                                            "type": "image/png"},
+                                           {"src": "/static/icon-512.png", "sizes": "512x512",
+                                            "type": "image/png"}]})
+            elif path == "/api/history":
+                self._json(200, {"ok": True, "messages": hist_tail(30), "count": hist_count()})
             elif path == "/api/auth":
                 self._json(200, {"ok": check_token(self), "auth_required": bool(TOKEN)})
-            elif path == "/api/history":
-                if self._need_auth():
+            elif path == "/api/debug/service_up":
+                stage = q.get("stage", "?")
+                RECENT_REQS.append({"t": time.strftime("%H:%M:%S"), "ua": "SERVICE:" + stage,
+                                    "webview": False})
+                del RECENT_REQS[:-20]
+                self._json(200, {"ok": True})
+            elif path == "/api/debug/decide":
+                last = hist_tail(6)
+                ctx = "\n".join(f"{m['role']}：{m['content'][:60]}" for m in last) or "（很久没聊了）"
+                d = she_decides(ctx, time.localtime().tm_hour)
+                self._json(200, {"ok": True, "decision": d, "raw": _LAST_DECIDE_RAW,
+                                 "ctx": ctx[:300]})
+            elif path == "/api/debug/polling":
+                self._json(200, {"ok": True, **PENDING_HITS, "recent": RECENT_REQS})
+            elif path == "/api/health":
+                self._json(200, {"ok": True, "persona_len": len(PERSONA), "model": PROV["model"]})
+            elif path == "/api/debug/proactive":
+                if not check_token(self):
+                    self._json(401, {"error": "need token"})
                     return
-                self._json(200, {"ok": True, "messages": hist_tail(30), "count": hist_count()})
+                kind = q.get("kind", "text")
+                txt = q.get("text", "喂？你在干嘛呢")
+                item = {"text": txt, "ts": time.time(), "kind": kind}
+                if kind == "call":
+                    item["audio"] = tts_b64(txt, fast=True)
+                push_unread(item)
+                self._json(200, {"ok": True, "item": {k: v for k, v in item.items() if k != "audio"},
+                                 "has_audio": bool(item.get("audio"))})
             elif path == "/api/pending":
-                if self._need_auth():
-                    return
-                global _unread
-                batch, _unread = _unread, []
-                self._json(200, {"ok": True, "items": batch})
+                # peek=1 只查看不清空（安卓后台服务用），避免把来电"吃掉"
+                ua = (self.headers.get("User-Agent") or "")[:60]
+                PENDING_HITS["last_ua"] = ua
+                try:
+                    RECENT_REQS.append({"t": time.strftime("%H:%M:%S"), "ua": ua,
+                                        "webview": "Mozilla" in ua})
+                    del RECENT_REQS[:-12]
+                except Exception:
+                    pass
+                if q.get("ack") == "1":
+                    PENDING_HITS["pop"] += 1
+                    PENDING_HITS["last_pop_ua"] = (self.headers.get("User-Agent") or "")[:80]
+                    self._json(200, {"ok": True, "items": pop_unread()})
+                else:
+                    PENDING_HITS["peek"] += 1
+                    self._json(200, {"ok": True, "items": peek_unread()})
             elif path == "/api/memory/timeline":
-                if self._need_auth():
-                    return
-                days = int(q.get("days", 7))
-                self._json(200, {"ok": True, "items": memory_rows(80), "days": days})
+                self._json(200, {"ok": True, "items": lm_timeline(int(q.get("days", 7)))})
             elif path == "/api/memory/search":
-                if self._need_auth():
-                    return
-                self._json(200, {"ok": True, "items": memory_search(q.get("q", ""))})
+                self._json(200, {"ok": True, "items": lm_search(q.get("q", ""))})
             elif path == "/api/stream":
-                if self._need_auth():
-                    return
                 self._stream(q.get("text", ""), call=(q.get("call") == "1"))
             else:
                 self._json(404, {"error": "not found"})
@@ -707,7 +685,6 @@ class Handler(BaseHTTPRequestHandler):
             traceback.print_exc()
             self._json(500, {"ok": False, "error": str(exc)})
 
-    # ---------- 流式 ----------
     def _stream(self, text: str, call: bool = False):
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
@@ -728,29 +705,42 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             hist_add("user", text)
+            if not call and wants_call(text):
+                reply = "好，我这就打给你"
+                queue_call_now()
+                hist_add("assistant", reply)
+                emit({"type": "delta", "t": reply})
+                emit({"type": "done", "reply": reply, "audio": tts_b64(reply, fast=True),
+                      "images": [], "emotion": "coquettish"})
+                return
             buf = []
-            toks = int(LLM.get("call_max_tokens", 120)) if call else int(LLM.get("max_tokens", 800))
-            for delta in llm_stream(_messages(text, call, 6 if call else 20), toks):
+            toks = 120 if call else 800
+            msgs = _messages(text, call, 6 if call else 20)
+            _hb_stop = [False]
+            threading.Thread(target=_heartbeat, args=(emit, _hb_stop), daemon=True).start()
+            for delta in llm_stream(msgs, toks):
                 buf.append(delta)
                 emit({"type": "delta", "t": delta})
+            _hb_stop[0] = True
             if call:
                 reply = clean_reply("".join(buf)) or "嗯"
+                _emo2 = pick_emotion((text or "") + " " + reply)
                 hist_add("assistant", reply)
                 try:
-                    lm_write(f"[{time.strftime('%H:%M')} 通话] 用户：{text[:60]}；我：{reply[:60]}"[:400])
+                    lm_write(f"[{time.strftime('%H:%M')} 通话] 包包：{text[:50]}；我：{reply[:50]}"[:400])
                 except Exception:
                     pass
                 emit({"type": "done", "reply": reply, "audio": None, "images": [],
-                      "emotion": pick_emotion(reply)})
+                      "emotion": _emo2})
                 return
-            done = post_process("".join(buf), text)
+            done = _post_process("".join(buf), text)
+            _emo = pick_emotion((text or "") + " " + done["reply"])
             emit({"type": "done", "reply": done["reply"], "audio": done["audio"],
-                  "images": done["images"], "emotion": done["emotion"]})
+                  "images": done["images"], "emotion": _emo})
         except Exception as exc:  # noqa: BLE001
             traceback.print_exc()
-            emit({"type": "error", "error": friendly_llm_error(exc)})
+            emit({"type": "error", "error": f"{type(exc).__name__}: {exc}"})
 
-    # ---------- POST ----------
     def do_POST(self):
         n = int(self.headers.get("Content-Length") or 0)
         try:
@@ -759,7 +749,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json(400, {"ok": False, "error": "bad json"})
             return
         path = self.path.split("?")[0]
-        if self._need_auth():
+        if path.startswith("/api/") and not check_token(self):
+            self._json(401, {"ok": False, "error": "需要访问口令", "need_token": True})
             return
         try:
             if path == "/api/chat":
@@ -768,35 +759,68 @@ class Handler(BaseHTTPRequestHandler):
                     self._json(200, {"ok": False, "error": "空消息"})
                     return
                 hist_add("user", text)
-                try:
-                    self._json(200, post_process("".join(llm_stream(_messages(text))), text))
-                except Exception as exc:  # noqa: BLE001
-                    traceback.print_exc()
-                    self._json(200, {"ok": False, "error": friendly_llm_error(exc)})
-            elif path == "/api/image":
-                if not payload.get("image"):
-                    self._json(400, {"ok": False, "error": "没有图片"})
+                if wants_call(text):
+                    queue_call_now()
+                    reply = "好，我这就打给你"
+                    hist_add("assistant", reply)
+                    self._json(200, {"ok": True, "reply": reply,
+                                     "audio": tts_b64(reply, fast=True), "images": []})
                     return
+                self._json(200, _post_process("".join(llm_stream(_messages(text))), text))
+            elif path == "/api/image":
+                img = payload.get("image") or ""
                 text = (payload.get("text") or "").strip() or "看看这个"
                 msgs = [{"role": "system", "content": PERSONA + TOOL_HINT}]
                 msgs += hist_tail(12)
                 msgs.append({"role": "user", "content": [
                     {"type": "text", "text": text},
-                    {"type": "image_url", "image_url": {"url": payload["image"]}}]})
+                    {"type": "image_url", "image_url": {"url": img}}]})
                 hist_add("user", f"[图片] {text}")
-                self._json(200, post_process(llm_once(msgs, 700), text))
+                self._json(200, _post_process(llm_once(msgs, 700), text))
+            elif path == "/api/vision_note":
+                img = payload.get("image") or ""
+                if not img.startswith("data:image/"):
+                    self._json(200, {"ok": False, "error": "bad image"})
+                    return
+                VISION["img"] = img
+                VISION["ts"] = time.time()
+
+                def _look(im=img):
+                    try:
+                        d = _vision_desc(im, "描述镜头里的这个人：外貌、穿着、动作、表情、周围环境，40 字内。")
+                        if d:
+                            VISION_DESC["text"] = d
+                            VISION_DESC["ts"] = time.time()
+                    except Exception:
+                        pass
+
+                threading.Thread(target=_look, daemon=True).start()
+                self._json(200, {"ok": True})
+            elif path == "/api/proactive_tick":
+                offline = bool(payload.get("offline"))
+                hard = bool(payload.get("force"))
+                self._json(200, {"ok": True, "result": _proactive_tick(force_offline=offline, force=hard)})
+            elif path == "/api/appearance":
+                img = payload.get("image") or ""
+                if not img.startswith("data:image"):
+                    self._json(400, {"ok": False, "error": "bad image"})
+                    return
+                os.makedirs(os.path.dirname(APPEARANCE), exist_ok=True)
+                open(APPEARANCE, "wb").write(base64.b64decode(img.split(",", 1)[1]))
+                self._json(200, {"ok": True})
+                q2 = parse_qs(urlparse(self.path).query)
+                t2 = (q2.get("text", [""])[0] or "").strip()
+                self._json(200, {"ok": True, "emotion": pick_emotion(t2)})
+            elif path == "/api/stt":
+                heard = stt(payload.get("audio") or "", fast=bool(payload.get("fast")))
+                self._json(200, {"ok": bool(heard), "text": heard})
             elif path == "/api/idle_talk":
                 ctx = "\n".join(f"{m['role']}：{m['content'][:60]}" for m in hist_tail(6))
-                try:
-                    line = clean_reply(llm_once([
+                line = clean_reply(llm_once([
                     {"role": "system", "content": PERSONA[:1200] +
                      "\n【现在是打电话，对面安静了一会儿。你自己说一句，一到两句，"
                      "随便聊点什么，别问「还在吗」。】"},
-                        {"role": "user", "content": "最近的对话：\n" + ctx}], 120))
-                except Exception as exc:  # noqa: BLE001
-                    traceback.print_exc()
-                    self._json(200, {"ok": False, "error": friendly_llm_error(exc)})
-                    return
+                    {"role": "user", "content": "最近的对话：\n" + ctx}], 120))
                 if not line:
                     self._json(200, {"ok": False})
                     return
@@ -804,52 +828,60 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, {"ok": True, "reply": line, "audio": tts_b64(line, fast=True)})
             elif path == "/api/tts":
                 txt = (payload.get("text") or "").strip()
-                self._json(200, {"ok": True, "audio": tts_b64(txt, fast=bool(payload.get("fast")))})
-            elif path == "/api/stt":
-                heard = stt(payload.get("audio") or "", fast=bool(payload.get("fast")))
-                self._json(200, {"ok": bool(heard), "text": heard})
+                fast = bool(payload.get("fast"))
+                emo = (payload.get("emotion") or "").strip()
+                self._json(200, {"ok": True, "audio": tts_b64(txt, fast=fast, emo=emo)})
             elif path == "/api/voice":
                 call_mode = bool(payload.get("call"))
-                heard = stt(payload.get("audio") or "")
+                heard = stt(payload.get("audio") or "", fast=call_mode)
                 if not heard:
                     self._json(200, {"ok": False, "error": "没听清，再说一次？"})
                     return
                 hist_add("user", heard)
                 if call_mode:
-                    reply = clean_reply("".join(llm_stream(_messages(heard, True, 6),
-                                                           int(LLM.get("call_max_tokens", 120)))) or "嗯")
+                    hist_add("assistant", "")   # 占位，_post_process 里会再写
+                    hist_rows = hist_count()
+                    buf = []
+                    for d in llm_stream(_messages(heard, True, 10), 160):
+                        buf.append(d)
+                    reply = clean_reply("".join(buf)) or "嗯"
+                    con = sqlite3.connect(HIST)
+                    con.execute("DELETE FROM msgs WHERE role='assistant' AND content=''")
+                    con.commit()
+                    con.close()
                     hist_add("assistant", reply)
-                    self._json(200, {"ok": True, "reply": reply, "audio": None, "images": [],
-                                     "heard": heard, "emotion": pick_emotion(reply)})
+                    try:
+                        lm_write(f"[{time.strftime('%Y-%m-%d %H:%M')} 通话] 包包说：{heard[:60]}；我回：{reply[:60]}"[:400])
+                    except Exception:
+                        pass
+                    self._json(200, {"ok": True, "reply": reply, "audio": None,
+                                     "images": [], "heard": heard,
+                                     "emotion": pick_emotion((heard or "") + " " + reply)})
                     return
-                out = post_process("".join(llm_stream(_messages(heard))), heard)
+                out = _post_process("".join(llm_stream(_messages(heard, call_mode))), heard)
                 out["heard"] = heard
                 self._json(200, out)
-            elif path == "/api/branding/upload":
-                ok = save_brand(payload.get("kind", ""), payload.get("image", ""))
-                self._json(200, {"ok": ok, **brand_info()})
-            elif path == "/api/branding/name":
-                nm = (payload.get("name") or "").strip()[:24]
-                if nm:
-                    open(os.path.join(BRAND_DIR, "name.txt"), "w", encoding="utf-8").write(nm)
-                self._json(200, {"ok": True, **brand_info()})
             elif path == "/api/memory/remember":
                 lm_write(f"[手动记录 {time.strftime('%Y-%m-%d %H:%M')}] "
                          f"{(payload.get('text') or '')[:400]}")
                 self._json(200, {"ok": True})
             elif path == "/api/memory/forget":
-                if payload.get("id"):
-                    memory_delete(payload["id"])
+                con = sqlite3.connect(LM_DB, timeout=10)
+                mid = payload.get("id")
+                if mid:
+                    con.execute("DELETE FROM documents WHERE id=?", (mid,))
+                con.commit()
+                con.close()
                 self._json(200, {"ok": True})
             elif path == "/api/memory/summary":
-                rows = memory_rows(60)
-                brief = "\n".join("- " + r["text"][:120] for r in rows[:40]) or "（没有记忆）"
+                rows = lm_timeline(7)
+                brief = "\n".join("- " + r["text"][:120] for r in rows[:40]) or "（这周没有记忆）"
                 txt = llm_once([
-                    {"role": "system", "content": "用第一人称、口语化、简短地总结这些记忆。"},
-                    {"role": "user", "content": brief}], 600)
+                    {"role": "system", "content": "你在总结一周的记忆，用第一人称、口语化、简短。"},
+                    {"role": "user", "content": "这是我这一周的记忆：\n" + brief}], 600)
                 self._json(200, {"ok": True, "summary": txt})
             elif path == "/api/clear":
-                con = _db()
+                con = sqlite3.connect(HIST)
                 con.execute("DELETE FROM msgs")
                 con.commit()
                 con.close()
@@ -861,13 +893,14 @@ class Handler(BaseHTTPRequestHandler):
             self._json(500, {"ok": False, "error": f"{type(exc).__name__}: {exc}"})
 
 
-# ------------------------------------------------------------------ 语音转文字
 _whisper = None
 
 
 _whisper_fast = None
+
+
 _HEARD_JUNK = ("中文普通话", "日常聊天", "说话人叫", "AI 角色叫", "以下是", "字幕",
-               "请不吝点赞", "订阅", "打赏")
+               "请不吝点赞", "订阅", "打赏", "明镜与点点栏目")
 
 
 def _clean_heard(t: str) -> str:
@@ -875,90 +908,237 @@ def _clean_heard(t: str) -> str:
     if not t:
         return ""
     for j in _HEARD_JUNK:
-        if j in t and len(t) <= 40:
-            return ""
+        if j in t:
+            # 整句几乎都是提示词 → 丢掉
+            if len(t) <= 40:
+                return ""
+            idx = t.find(j)
+            t = t[:idx] + t[idx + 30:]
     return t.strip(" ，。,.、\n")
 
 
 def stt(data_url: str, fast: bool = False) -> str:
+    """fast=True 用 base（通话追速度），否则 small（聊天追准确）。"""
     global _whisper, _whisper_fast
-    if not data_url or not CFG["stt"].get("enabled", True):
+    if not data_url:
         return ""
     from faster_whisper import WhisperModel as _WM
+
     if fast:
         if _whisper_fast is None:
             _whisper_fast = _WM("base", device="cpu", compute_type="int8")
         model = _whisper_fast
     else:
         if _whisper is None:
-            _whisper = _WM(CFG["stt"].get("model", "small"), device="cpu", compute_type="int8")
+            _whisper = _WM("small", device="cpu", compute_type="int8")
         model = _whisper
     import numpy as np
 
     head, b64 = data_url.split(",", 1) if "," in data_url else ("", data_url)
     ext = "webm" if "webm" in head else ("wav" if "wav" in head else "ogg")
-    tmp = os.path.join(ROOT, "..", "data")
-    os.makedirs(tmp, exist_ok=True)
-    raw_path = os.path.join(tmp, f"voice_in.{ext}")
-    pcm = os.path.join(tmp, "voice_in.pcm")
+    raw_path = rf"C:\rvc\output\voice_in.{ext}"
     open(raw_path, "wb").write(base64.b64decode(b64))
-    ff = CFG["stt"].get("ffmpeg", "ffmpeg")
-    os.system(f'"{ff}" -y -loglevel error -i "{raw_path}" -ar 16000 -ac 1 -f s16le "{pcm}"')
+    # 用 ffmpeg 解成 16k 单声道 PCM，交给 numpy 喂模型（绕开 PyAV 版本问题）
+    pcm = r"C:\rvc\output\voice_in.pcm"
+    os.system(f'ffmpeg -y -loglevel error -i "{raw_path}" -ar 16000 -ac 1 -f s16le "{pcm}"')
     audio = np.fromfile(pcm, dtype=np.int16).astype(np.float32) / 32768.0
     if audio.size == 0:
         return ""
-    segs, _ = model.transcribe(audio, language="zh", vad_filter=True,
-                               beam_size=5, condition_on_previous_text=False,
-                               vad_parameters={"min_silence_duration_ms": 400})
+    segs, _ = model.transcribe(
+        audio, language="zh", vad_filter=True, beam_size=5,
+        condition_on_previous_text=False,
+        vad_parameters={"min_silence_duration_ms": 400})
     return _clean_heard("".join(sx.text for sx in segs))
 
 
-def warm_stt():
+def _warm_stt():
     try:
         global _whisper
         from faster_whisper import WhisperModel
-
-        _whisper = WhisperModel(CFG["stt"].get("model", "base"), device="cpu", compute_type="int8")
-        print("[app] STT 已预热", flush=True)
+        _whisper = WhisperModel("small", device="cpu", compute_type="int8")
+        print("[chat] STT 已预热", flush=True)
     except Exception:
         traceback.print_exc()
 
 
-# ------------------------------------------------------------------ 主动消息
-def proactive_loop():
-    global _unread
-    pc = CFG.get("proactive", {})
-    if not pc.get("enabled"):
-        return
-    idle = float(pc.get("idle_minutes", 30)) * 60
-    every = float(pc.get("interval_minutes", 10)) * 60
-    lo, hi = pc.get("active_hours", [8, 23])
+QQ_USER_ID = int(os.environ.get("AC_QQ_USER", "0") or 0)
+QQ_HTTP = "http://127.0.0.1:3000"
+QQ_TOKEN = "lzy20061031"
+
+
+def qq_send(text: str) -> bool:
+    """通过 NapCat HTTP 接口给她在 QQ 上发一条消息。"""
+    try:
+        body = json.dumps({"user_id": QQ_USER_ID,
+                           "message": [{"type": "text", "data": {"text": text}}]}).encode()
+        req = urllib.request.Request(QQ_HTTP + "/send_private_msg", data=body,
+                                     headers={"Content-Type": "application/json",
+                                              "Authorization": f"Bearer {QQ_TOKEN}"}, method="POST")
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return r.status == 200
+    except Exception:
+        traceback.print_exc()
+        return False
+
+
+def qq_online() -> bool:
+    """QQ 是否真的在线：问 NapCat 本身（端口开着不代表登录着）。"""
+    try:
+        req = urllib.request.Request(
+            "http://127.0.0.1:3000/get_status", data=b"{}",
+            headers={"Content-Type": "application/json",
+                     "Authorization": "Bearer lzy20061031"}, method="POST")
+        with urllib.request.urlopen(req, timeout=6) as r:
+            d = json.loads(r.read().decode("utf-8", "ignore"))
+        if d.get("status") == "ok":
+            data = d.get("data") or {}
+            return bool(data.get("online")) and bool(data.get("good", True))
+        return False
+    except Exception:
+        return False
+
+
+_qq_state = {"online": None}
+
+
+def _qq_watch_loop():
+    """盯着 QQ：掉线就通过 App 告诉你（QQ 掉线时 App 是唯一通道）。"""
     while True:
         try:
-            time.sleep(every)
-            now = time.time()
-            hour = time.localtime().hour
-            if hour < lo or hour > hi or _unread or now - last_activity() < idle:
+            time.sleep(180)
+            now_on = qq_online()
+            prev = _qq_state["online"]
+            if prev is None:
+                _qq_state["online"] = now_on
                 continue
-            ctx = "\n".join(f"{m['role']}：{m['content'][:60]}" for m in hist_tail(6)) or "（很久没聊了）"
-            msg = clean_reply(llm_once([
+            if prev and not now_on:
+                push_unread({"text": "我 QQ 掉线了…正想办法重新登，你先在 App 里找我。",
+                             "ts": time.time(), "kind": "text"})
+                print("[qq-watch] 掉线，已通知 App", flush=True)
+            elif not prev and now_on:
+                push_unread({"text": "QQ 重新登上了，我回来啦。",
+                             "ts": time.time(), "kind": "text"})
+                print("[qq-watch] 恢复", flush=True)
+            _qq_state["online"] = now_on
+        except Exception:
+            traceback.print_exc()
+
+
+def _last_activity() -> float:
+    con = sqlite3.connect(HIST)
+    row = con.execute("SELECT MAX(ts) FROM msgs").fetchone()
+    con.close()
+    return float(row[0] or 0)
+
+
+def she_decides(ctx: str, hour: int) -> str:
+    """问她本人：现在想不想联系他。返回 call / msg / none。"""
+    try:
+        ans = llm_once([
+            {"role": "system", "content": PERSONA},
+            {"role": "user", "content":
+                "（系统提示：现在是" + str(hour) + "点，你们有一阵没说话了。"
+                "你自己决定要不要主动找他。只回一个词：\n"
+                "打电话 —— 你有点想他，想听听他的声音\n"
+                "发消息 —— 想随口跟他说句话\n"
+                "不打扰 —— 你完全没惦记他\n"
+                "最近的对话：\n" + ctx + "）"}], 48)
+        a = (ans or "").strip()
+        if not a:
+            ans = llm_once([
                 {"role": "system", "content": PERSONA},
-                {"role": "user", "content": "（系统提示：现在空闲，你可以主动给他发一条消息，一到两句，"
-                                            "随口一点。最近对话：\n" + ctx + "）"}], 200))
-            if not msg:
-                continue
-            hist_add("assistant", msg)
-            _unread.append({"text": msg, "ts": now})
+                {"role": "user", "content": "只回一个词：打电话、发消息、或 不打扰。"}], 48)
+            a = (ans or "").strip()
+        global _LAST_DECIDE_RAW
+        _LAST_DECIDE_RAW = a[:120]
+        if "打电话" in a:
+            return "call"
+        if "发消息" in a or "消息" in a:
+            return "msg"
+        return "none"
+    except Exception:
+        traceback.print_exc()
+        return "none"
+
+
+def _heartbeat(emit, stop_flag):
+    """模型思考期间每 3 秒发一个注释行，防止云端隧道把连接掐掉。"""
+    while not stop_flag[0]:
+        time.sleep(3)
+        if stop_flag[0]:
+            break
+        try:
+            emit({"type": "ping"})
+        except Exception:
+            break
+
+
+def _proactive_tick(force_offline: bool = False, force: bool = False) -> dict:
+    """跑一轮主动判断。返回这一轮做了什么（便于排查）。"""
+    now = time.time()
+    hour = time.localtime().tm_hour
+    if hour < 8 or hour > 23:
+        return {"skip": "night"}
+    if (not force) and now - _last_activity() < (1200 if force_offline else 1800):
+        return {"skip": "recent_chat"}
+    if _unread and not force:
+        return {"skip": "pending_unread"}
+    online = False if force_offline else qq_online()
+    if online and now - _last_call < 7200:
+        return {"skip": "qq_online"}          # QQ 在，交给她在 QQ 里说
+    last = hist_tail(6)
+    ctx = "\n".join(f"{m['role']}：{m['content'][:60]}" for m in last) or "（很久没聊了）"
+    decision = she_decides(ctx, hour)
+    if decision == "none":
+        return {"decision": "none", "online": online}
+    want_call = (decision == "call") and (now - _last_call >= 7200)
+    if want_call:
+        msg = llm_once([
+            {"role": "system", "content": PERSONA},
+            {"role": "user", "content": "（系统提示：你主动给他打电话。接通后你说的第一句，"
+                                        "一到两句，随意自然，像真的拨通了。最近的对话：\n" + ctx + "）"}], 120)
+    else:
+        msg = llm_once([
+            {"role": "system", "content": PERSONA},
+            {"role": "user", "content": "（系统提示：现在是空闲时间，你可以主动给他发一条消息，"
+                                        "一到两句，随口一点。最近的对话：\n" + ctx + "）"}], 200)
+    msg = clean_reply(msg or "").strip()
+    if not msg:
+        return {"decision": "empty"}
+    hist_add("assistant", msg)
+    item = {"text": msg, "ts": now, "kind": "call" if want_call else "text"}
+    if want_call and online:
+        qq_send(f"（我在 App 里打了电话给你，点开 App 接听）{msg[:20]}")
+    if want_call:
+        item["audio"] = tts_b64(msg, fast=True)
+    push_unread(item)
+    try:
+        lm_write(f"[{time.strftime('%Y-%m-%d %H:%M')} 手机APP·主动] {msg[:200]}")
+    except Exception:
+        pass
+    return {"decision": decision, "text": msg[:30], "call": want_call, "online": online}
+
+
+def _proactive_loop():
+    while True:
+        try:
+            # QQ 掉线时每 5 分钟看一次，在线时 10 分钟一次
+            time.sleep(300 if not qq_online() else 600)
+            r = _proactive_tick()
+            if "skip" not in r:
+                print("[proactive]", r, flush=True)
         except Exception:
             traceback.print_exc()
 
 
 if __name__ == "__main__":
-    print(f"[app] 人格 {len(PERSONA)} 字 | 模型 {LLM['model']} | TTS {'开' if TTS_CFG.get('endpoint') else '关'}"
-          f" | 出图 {'开' if IMG_CFG.get('endpoint') else '关'} | 共享记忆 {'开' if lm_enabled() else '关'}"
-          f" | 口令 {'开' if TOKEN else '关'}", flush=True)
-    print(f"[app] http://{HOST}:{PORT}", flush=True)
-    threading.Thread(target=proactive_loop, daemon=True).start()
-    if CFG["stt"].get("enabled", True):
-        threading.Thread(target=warm_stt, daemon=True).start()
-    ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
+    _hist_init()
+    print(f"[chat] 人格 {len(PERSONA)} 字，模型 {PROV['model']}", flush=True)
+    print(f"[chat] http://127.0.0.1:{PORT}", flush=True)
+    import threading
+
+    threading.Thread(target=_proactive_loop, daemon=True).start()
+    threading.Thread(target=_qq_watch_loop, daemon=True).start()
+    _load_vision()
+    threading.Thread(target=_warm_stt, daemon=True).start()
+    ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
